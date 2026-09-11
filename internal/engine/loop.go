@@ -3,11 +3,11 @@ package engine
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
-	"go.uber.org/zap"
 )
 
 type AgentEngine struct {
@@ -16,14 +16,14 @@ type AgentEngine struct {
 	provider provider.LLMProvider
 	registry tools.Registry
 
-	logger *zap.Logger
+	enableThinking bool // 是否启用思考。
 }
 
 func NewAgentEngine(
 	workDir string,
 	llmProvider provider.LLMProvider,
 	toolRegistry tools.Registry,
-	logger *zap.Logger,
+	enableThinking bool,
 ) (*AgentEngine, error) {
 	return &AgentEngine{
 		WorkDir: workDir,
@@ -31,18 +31,23 @@ func NewAgentEngine(
 		provider: llmProvider,
 		registry: toolRegistry,
 
-		logger: logger,
+		enableThinking: enableThinking,
 	}, nil
 }
 
 func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
-	e.logger.Info("[engine] start running, lock workspace", zap.String("workspace", e.WorkDir))
+	slog.Info("[engine] Agent 引擎启动, 锁定工作区", "workspace", e.WorkDir)
+	slog.Info("[engine] 慢思考模式 ( Thinking Phase )", "enabled", e.enableThinking)
 
 	// 1. 初始化会话 Context。
 	contextHistory := []schema.Message{
 		{
 			Role:    schema.RoleSys,
 			Content: "You are Goaw, an expert coding assistant. You have full access to tools in the workspace.",
+		},
+		{
+			Role:    schema.RoleSys,
+			Content: "I need you anwser in Chinese.",
 		},
 		{
 			Role:    schema.RoleUser,
@@ -55,38 +60,53 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
 	// 2. 开始主循环 ( 标准的 ReAct 循环 )。
 	for {
 		turnCnt++
-		e.logger.Info("[engine] start turn", zap.Int("turn", turnCnt))
+		slog.Info("[engine] start turn", "turn", turnCnt)
 
+		// 2.1 慢思考阶段 ( 剥夺工具强制规划 )
+		if e.enableThinking {
+			slog.Debug("[engine] 剥夺工具访问权，强制进入慢思考与规划阶段...")
+
+			// 传入的 availableTools 为 nil。
+			thinkResp, err := e.provider.Generate(ctx, contextHistory, nil)
+			if err != nil {
+				return fmt.Errorf("failed to generate thinking response: %w", err)
+			}
+
+			if thinkResp.Content != "" {
+				slog.Debug("[engine] 🧠 [内部思考 Trace] ->", "content", thinkResp.Content)
+				contextHistory = append(contextHistory, *thinkResp)
+			}
+		}
+
+		// 2.2 行动阶段 ( Action )，恢复工具调用。
+		slog.Debug("[engine] 恢复工具挂载，等待模型采取行动...")
 		// 获取工具。
 		availableTools := e.registry.GetAvailableTools()
-
-		// 发起推理请求。
-		e.logger.Info("[engine] start reasoning ...")
-		resp, err := e.provider.Generate(ctx, contextHistory, availableTools)
+		actionResp, err := e.provider.Generate(ctx, contextHistory, availableTools)
 		if err != nil {
-			return fmt.Errorf("failed to generate response: %w", err)
+			return fmt.Errorf("failed to generate action response: %w", err)
 		}
 
-		contextHistory = append(contextHistory, *resp)
-
-		if resp.Content != "" {
-			e.logger.Info("[engine] LLM response", zap.String("response", resp.Content))
+		if actionResp.Content != "" {
+			slog.Debug("[engine] 🤖 [对外回复] ->", "content", actionResp.Content)
 		}
 
-		if len(resp.ToolCalls) == 0 {
-			e.logger.Info("[engine] no tool calls, end turn")
+		contextHistory = append(contextHistory, *actionResp)
+
+		if len(actionResp.ToolCalls) == 0 {
+			slog.Debug("[engine] 没有工具调用，结束回合")
 			break
 		}
 
-		e.logger.Info("[engine] start tool calls ...", zap.Int("tool_count", len(resp.ToolCalls)))
-		for _, tc := range resp.ToolCalls {
-			e.logger.Info("[engine] -> 🛠️ start tool call", zap.String("tool_name", tc.Name), zap.String("args", string(tc.Args)))
+		slog.Info("[engine] 模型请求工具调用...", "tool_count", len(actionResp.ToolCalls))
+		for _, tc := range actionResp.ToolCalls {
+			slog.Info("[engine] -> 🛠️ 工具调用", "tool_name", tc.Name, "args", string(tc.Args))
 
 			res := e.registry.Exec(ctx, tc)
 			if res.Error == "" {
-				e.logger.Info("[engine] -> ✅ tool call success", zap.Int("return_bytes", len(res.Output)))
+				slog.Info("[engine] -> ✅ 工具调用成功", "return_bytes", len(res.Output))
 			} else {
-				e.logger.Info("[engine] -> ❌ tool call failed", zap.String("error", res.Error))
+				slog.Info("[engine] -> ❌ 工具调用错误", "error", res.Error)
 			}
 
 			obsMsg := schema.Message{

@@ -20,14 +20,21 @@ func NewMockProvider() *MockProvider {
 func (p *MockProvider) Generate(
 	_ context.Context,
 	_ []schema.Message,
-	_ []schema.ToolDef,
+	tools []schema.ToolDef,
 ) (*schema.Message, error) {
+	if len(tools) == 0 {
+		return &schema.Message{
+			Role:    schema.RoleAssistant,
+			Content: "[Thinking phase] The goal is to check the file list in the current directory. I need to first use the bash tool to run the `ls` command to see what's in the current directory, and then decide what to do next.",
+		}, nil
+	}
+
 	p.turn++
 
 	if p.turn == 1 {
 		return &schema.Message{
 			Role:    schema.RoleAssistant,
-			Content: "Let me see what files are in the current directory.",
+			Content: "I'm going to carry out the steps I've planned.",
 			ToolCalls: []schema.ToolCall{
 				{ID: "bash:ls_la", Name: "bash", Args: []byte(`{"command": "ls -la"}`)},
 			},
@@ -36,6 +43,6 @@ func (p *MockProvider) Generate(
 
 	return &schema.Message{
 		Role:    schema.RoleAssistant,
-		Content: "I have checked the file list, mission accomplished.",
+		Content: "Base on the resuls of the tool call, the task was successfully completed.",
 	}, nil
 }

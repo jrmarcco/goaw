@@ -16,12 +16,27 @@ func NewMockRegistry() *mockRegistry {
 }
 
 func (r *mockRegistry) GetAvailableTools() []schema.ToolDef {
-	return nil
+	return []schema.ToolDef{
+		{
+			Name:        "get_weather",
+			Description: "Get the weather of current city",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"city": map[string]any{
+						"type": "string",
+					},
+				},
+				"required": []string{"city"},
+			},
+		},
+	}
 }
 
 func (r *mockRegistry) Exec(_ context.Context, call schema.ToolCall) *schema.ToolCallRes {
 	return &schema.ToolCallRes{
 		ID:     call.ID,
-		Output: "-rw-rw-r-- 1 jrmarcco jrmarcco 82 Aug  5 21:16 main.go",
+		Output: "API response: Today's weather is sunny with a temperature of 20°C.",
+		Error:  "",
 	}
 }
