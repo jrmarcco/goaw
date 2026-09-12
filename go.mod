@@ -4,7 +4,6 @@ go 1.26
 
 require (
 	github.com/openai/openai-go/v3 v3.61.0
-	github.com/sashabaranov/go-openai v1.42.0
 	go.uber.org/zap v1.28.0
 	go.uber.org/zap/exp v0.3.0
 )
