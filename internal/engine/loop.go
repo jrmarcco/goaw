@@ -102,11 +102,11 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
 		for _, tc := range actionResp.ToolCalls {
 			slog.Info("[engine] -> 🛠️ 工具调用", "tool_name", tc.Name, "args", string(tc.Args))
 
-			res := e.registry.Exec(ctx, tc)
-			if res.Error == "" {
-				slog.Info("[engine] -> ✅ 工具调用成功", "return_bytes", len(res.Output))
+			res := e.registry.Execute(ctx, tc)
+			if res.IsError {
+				slog.Info("[engine] -> ❌ 工具调用错误", "error_output", res.Output)
 			} else {
-				slog.Info("[engine] -> ❌ 工具调用错误", "error", res.Error)
+				slog.Info("[engine] -> ✅ 工具调用成功", "return_bytes", len(res.Output))
 			}
 
 			obsMsg := schema.Message{

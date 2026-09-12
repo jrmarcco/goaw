@@ -1,6 +1,6 @@
 module github.com/jrmarcco/goaw
 
-go 1.26
+go 1.27
 
 require (
 	github.com/openai/openai-go/v3 v3.61.0

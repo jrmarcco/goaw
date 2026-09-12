@@ -36,7 +36,7 @@ type ToolCall struct {
 
 // ToolCallRes 是工具调用的返回结果。
 type ToolCallRes struct {
-	ID     string `json:"id"`
-	Output string `json:"output"`
-	Error  string `json:"error,omitempty"`
+	ID      string `json:"id"`
+	Output  string `json:"output"`
+	IsError bool   `json:"isError,omitempty"`
 }
