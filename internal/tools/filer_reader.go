@@ -31,13 +31,13 @@ func (r *FileReader) Name() string {
 func (r *FileReader) Definition() schema.ToolDef {
 	return schema.ToolDef{
 		Name:        r.Name(),
-		Description: "",
+		Description: "读取指定路径的文件内容，请提供工作目录内的相对路径。",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"path": map[string]any{
 					"type":        "string",
-					"description": "目标文件的路径，例如 cmd/main.go",
+					"description": "目标文件的相对路径，例如 cmd/main.go",
 				},
 			},
 			"required": []string{"path"},
