@@ -11,7 +11,7 @@ import (
 )
 
 type AgentEngine struct {
-	WorkDir string // 工作区路径。
+	Workspace string // 工作区路径。
 
 	provider provider.LLMProvider
 	registry tools.Registry
@@ -20,13 +20,13 @@ type AgentEngine struct {
 }
 
 func NewAgentEngine(
-	workDir string,
+	workspace string,
 	llmProvider provider.LLMProvider,
 	toolRegistry tools.Registry,
 	enableThinking bool,
 ) (*AgentEngine, error) {
 	return &AgentEngine{
-		WorkDir: workDir,
+		Workspace: workspace,
 
 		provider: llmProvider,
 		registry: toolRegistry,
@@ -36,7 +36,7 @@ func NewAgentEngine(
 }
 
 func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
-	slog.Info("[engine] Agent 引擎启动, 锁定工作区", "workspace", e.WorkDir)
+	slog.Info("[engine] Agent 引擎启动, 锁定工作区", "workspace", e.Workspace)
 	slog.Info("[engine] 慢思考模式 ( Thinking Phase )", "enabled", e.enableThinking)
 
 	// 1. 初始化会话 Context。

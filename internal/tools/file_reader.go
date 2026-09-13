@@ -15,12 +15,12 @@ import (
 var _ Tool = (*FileReader)(nil)
 
 type FileReader struct {
-	workDir string
+	workspace string
 }
 
-func NewFileReader(workDir string) *FileReader {
+func NewFileReader(workspace string) *FileReader {
 	return &FileReader{
-		workDir: workDir,
+		workspace: workspace,
 	}
 }
 
@@ -29,18 +29,20 @@ func (r *FileReader) Name() string {
 }
 
 func (r *FileReader) Definition() schema.ToolDef {
+	const propNamePath = "path"
+
 	return schema.ToolDef{
 		Name:        r.Name(),
 		Description: "读取指定路径的文件内容，请提供工作目录内的相对路径。",
 		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"path": map[string]any{
-					"type":        "string",
-					"description": "目标文件的相对路径，例如 cmd/main.go",
+			schema.KeyType: schema.TypeObject,
+			schema.KeyProperties: map[string]any{
+				propNamePath: map[string]any{
+					schema.KeyType:        schema.TypeString,
+					schema.KeyDescription: "目标文件的相对路径，例如 cmd/main.go",
 				},
 			},
-			"required": []string{"path"},
+			schema.KeyRequired: []string{propNamePath},
 		},
 	}
 }
@@ -52,16 +54,16 @@ func (r *FileReader) Execute(_ context.Context, args json.RawMessage) (string, e
 	}
 
 	if !filepath.IsLocal(input.Path) {
-		return "", fmt.Errorf("文件路径必须是工作目录内的相对路径: %q", input.Path)
+		return "", fmt.Errorf("文件路径必须是工作区内的相对路径: %q", input.Path)
 	}
 
-	root, err := os.OpenRoot(r.workDir)
+	root, err := os.OpenRoot(r.workspace)
 	if err != nil {
-		return "", fmt.Errorf("打开工作目录失败: %w", err)
+		return "", fmt.Errorf("打开工作区失败: %w", err)
 	}
 	defer func() {
 		if closeErr := root.Close(); closeErr != nil {
-			slog.Error("[file reader] 关闭工作目录失败", "error", closeErr)
+			slog.Error("[file reader] 关闭工作区失败", "error", closeErr)
 		}
 	}()
 
@@ -82,9 +84,8 @@ func (r *FileReader) Execute(_ context.Context, args json.RawMessage) (string, e
 
 	const MaxLen = 8192
 	if len(content) > MaxLen {
-		fullPath := filepath.Join(r.workDir, input.Path)
-		truncateMsg := fmt.Sprintf("%s\n\n...[文件内容过长，已截断至前 %d 字节]", fullPath, MaxLen)
-		return truncateMsg, nil
+		fullPath := filepath.Join(r.workspace, input.Path)
+		return fmt.Sprintf("%s\n\n...[文件内容过长，已截断至前 %d 字节]", fullPath, MaxLen), nil
 	}
 
 	return string(content), nil

@@ -24,7 +24,7 @@ func main() {
 
 	fmt.Println("🚀 Welcome to goaw!")
 
-	workDir, _ := os.Getwd()
+	workspace, _ := os.Getwd()
 
 	p, err := provider.NewOpenAIV3Provider("glm-4.5-air")
 	if err != nil {
@@ -33,10 +33,10 @@ func main() {
 
 	r := tools.NewDefaultRegistry()
 
-	fileReader := tools.NewFileReader(workDir)
+	fileReader := tools.NewFileReader(workspace)
 	_ = r.Register(fileReader)
 
-	ae, _ := engine.NewAgentEngine(workDir, p, r, false)
+	ae, _ := engine.NewAgentEngine(workspace, p, r, false)
 
 	prompt := "Read the code of cmd/main.go and tell me how many lines of code it has."
 	if err := ae.Run(context.Background(), prompt); err != nil {
