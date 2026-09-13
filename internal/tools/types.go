@@ -5,8 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/jrmarcco/goaw/internal/schema"
+)
+
+const (
+	dirPerm  os.FileMode = 0o755 // 目录权限: rwxr-xr-x
+	filePerm os.FileMode = 0o644 // 文件权限: rw-r--r--
 )
 
 // Tool 工具的通用接口。

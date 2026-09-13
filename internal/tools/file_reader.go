@@ -39,7 +39,7 @@ func (r *FileReader) Definition() schema.ToolDef {
 			schema.KeyProperties: map[string]any{
 				propNamePath: map[string]any{
 					schema.KeyType:        schema.TypeString,
-					schema.KeyDescription: "目标文件的相对路径，例如 cmd/main.go",
+					schema.KeyDescription: "待读取的文件相对路径，例如 cmd/main.go",
 				},
 			},
 			schema.KeyRequired: []string{propNamePath},

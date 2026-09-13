@@ -12,11 +12,6 @@ import (
 
 var _ Tool = (*FileWriter)(nil)
 
-const (
-	dirPerm  os.FileMode = 0o755 // 目录权限: rwxr-xr-x
-	filePerm os.FileMode = 0o644 // 文件权限: rw-r--r--
-)
-
 type FileWriter struct {
 	workspace string
 }
@@ -43,7 +38,7 @@ func (w *FileWriter) Definition() schema.ToolDef {
 			schema.KeyProperties: map[string]any{
 				propNamePath: map[string]any{
 					schema.KeyType:        schema.TypeString,
-					schema.KeyDescription: "目标文件的相对路径，例如 cmd/main.go",
+					schema.KeyDescription: "待写入的文件相对路径，例如 cmd/main.go",
 				},
 				propNameContent: map[string]any{
 					schema.KeyType:        schema.TypeString,
