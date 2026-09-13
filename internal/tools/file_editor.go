@@ -123,7 +123,7 @@ func (e *FileEditor) fuzzyReplace(oriContent, oldContent, newContent string) (st
 		return strings.Replace(oriContent, oldContent, newContent, 1), nil
 	}
 	if cnt > 1 {
-		return "", fmt.Errorf("old_content 在原始文件中出现了 %d 次，无法确定唯一匹配", cnt)
+		return "", fmt.Errorf("oldContent 在原始文件中出现了 %d 次，无法确定唯一匹配", cnt)
 	}
 
 	// L2: 统一换行符 ( \r\n 转为 \n )。
@@ -152,9 +152,57 @@ func (e *FileEditor) fuzzyReplace(oriContent, oldContent, newContent string) (st
 
 // lineByLineReplace 逐行替换内容。
 // 将文本按行切割，去除首位空白后进行滑动窗口匹配。
-func (e *FileEditor) lineByLineReplace(_, _, _ string) (string, error) {
-	// TODO: not implemented
-	panic("not implemented")
+func (e *FileEditor) lineByLineReplace(content, oldContent, newContent string) (string, error) {
+	contentlines := strings.Split(content, "\n")
+	oldlines := strings.Split(strings.TrimSpace(oldContent), "\n")
+
+	if len(oldlines) == 0 || len(contentlines) < len(oldlines) {
+		return "", fmt.Errorf("未找到匹配 oldContent 的文本内容")
+	}
+
+	// 清理 oldContent 每行首位空白。
+	for i := range oldlines {
+		oldlines[i] = strings.TrimSpace(oldlines[i])
+	}
+
+	matchedCnt := 0
+	matchStartIndex := -1
+	matchEndIndex := -1
+
+	// 滑动窗口查找匹配文本块。
+	for i := 0; i <= len(contentlines)-len(oldlines); i++ {
+		matched := true
+
+		for j := 0; j < len(oldlines); j++ {
+			if strings.TrimSpace(contentlines[i+j]) != oldlines[j] {
+				matched = false
+				break
+			}
+		}
+
+		if matched {
+			matchedCnt++
+			matchStartIndex = i
+			matchEndIndex = i + len(oldlines)
+		}
+	}
+
+	if matchedCnt == 0 {
+		return "", fmt.Errorf("未找到匹配 oldContent 的文本内容，请仔细确认文件内容和缩进")
+	}
+
+	if matchedCnt > 1 {
+		return "", fmt.Errorf("找到 %d 个匹配 oldContent 的文本内容，请提供更明确的上下文", matchedCnt)
+	}
+
+	// 执行替换。
+	// TODO: 这里简单处理，将 newContent 直接作为整体替换进去。
+	newContentLines := make([]string, 0, len(contentlines)-len(oldlines)+1)
+	newContentLines = append(newContentLines, contentlines[:matchStartIndex]...)
+	newContentLines = append(newContentLines, newContent)
+	newContentLines = append(newContentLines, contentlines[matchEndIndex:]...)
+
+	return strings.Join(newContentLines, "\n"), nil
 }
 
 type fileEditArgs struct {
