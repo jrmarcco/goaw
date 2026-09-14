@@ -7,6 +7,7 @@ require (
 	github.com/openai/openai-go/v3 v3.61.0
 	go.uber.org/zap v1.28.0
 	go.uber.org/zap/exp v0.3.0
+	golang.org/x/sync v0.23.0
 )
 
 require (

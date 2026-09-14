@@ -26,20 +26,25 @@ func main() {
 
 	workspace, _ := os.Getwd()
 
-	p, err := provider.NewOpenAIV3Provider("glm-4.5-air")
+	llmProvider, err := provider.NewOpenAIV3Provider("glm-4.5-air")
 	if err != nil {
 		log.Fatalf("failed to create provider: %v", err)
 	}
 
-	r := tools.NewDefaultRegistry()
+	toolRegistry := tools.NewDefaultRegistry()
 
-	fileReader := tools.NewFileReader(workspace)
-	_ = r.Register(fileReader)
+	_ = toolRegistry.Register(tools.NewFileReader(workspace))
+	_ = toolRegistry.Register(tools.NewFileWriter(workspace))
+	_ = toolRegistry.Register(tools.NewFileEditor(workspace))
+	_ = toolRegistry.Register(tools.NewBashExecutor(workspace))
 
-	ae, _ := engine.NewAgentEngine(workspace, p, r, false)
+	eng, _ := engine.NewAgentEngine(workspace, llmProvider, toolRegistry, true)
 
-	prompt := "Read the code of cmd/main.go and tell me how many lines of code it has."
-	if err := ae.Run(context.Background(), prompt); err != nil {
+	prompt := `
+	当前目录下有 a.txt, b.txt, c.txt 三个文件。
+	为了节省时间，请你同时一次性读取这三个文件，并将它们的内容综合起来，告诉我它们分别记录了什么领域的信息。
+	`
+	if err := eng.Run(context.Background(), prompt); err != nil {
 		log.Fatalf("engine crash: %v", err)
 	}
 }

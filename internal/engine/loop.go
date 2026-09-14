@@ -8,6 +8,7 @@ import (
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
+	"golang.org/x/sync/errgroup"
 )
 
 type AgentEngine struct {
@@ -94,29 +95,38 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
 		contextHistory = append(contextHistory, *actionResp)
 
 		if len(actionResp.ToolCalls) == 0 {
-			slog.Debug("[engine] 没有工具调用，结束回合")
+			slog.Debug("[engine] 模型没有请求工具调用，任务结束。")
 			break
 		}
 
-		slog.Info("[engine] 模型请求工具调用...", "tool_count", len(actionResp.ToolCalls))
-		for _, tc := range actionResp.ToolCalls {
-			slog.Info("[engine] -> 🛠️ 工具调用", "tool_name", tc.Name, "args", string(tc.Args))
+		slog.Info("[engine] 模型请求并发执行工具调用...", "tool_count", len(actionResp.ToolCalls))
 
-			res := e.registry.Execute(ctx, tc)
-			if res.IsError {
-				slog.Info("[engine] -> ❌ 工具调用错误", "error_output", res.Output)
-			} else {
-				slog.Info("[engine] -> ✅ 工具调用成功", "return_bytes", len(res.Output))
-			}
+		obsMsgs := make([]schema.Message, len(actionResp.ToolCalls))
+		var errGroup errgroup.Group
 
-			obsMsg := schema.Message{
-				Role:       schema.RoleUser,
-				Content:    res.Output,
-				ToolCallID: tc.ID,
-			}
-			contextHistory = append(contextHistory, obsMsg)
+		for idx, tc := range actionResp.ToolCalls {
+			// 为每个工具单独分配一个 goroutine。
+			errGroup.Go(func() error {
+				slog.Info("[engine] -> 🛠️ 并发执行工具调用", "goroutine_index", idx, "tool_name", tc.Name, "args", string(tc.Args))
+
+				res := e.registry.Execute(ctx, tc)
+				if res.IsError {
+					slog.Info("[engine] -> ❌ 工具调用错误", "goroutine_index", idx, "error_output", res.Output)
+				} else {
+					slog.Info("[engine] -> ✅ 工具调用成功", "goroutine_index", idx, "return_bytes", len(res.Output))
+				}
+
+				obsMsgs[idx] = schema.Message{
+					Role:       schema.RoleUser,
+					Content:    res.Output,
+					ToolCallID: tc.ID,
+				}
+				return nil
+			})
 		}
 
+		_ = errGroup.Wait()
+		contextHistory = append(contextHistory, obsMsgs...)
 	}
 	return nil
 }
