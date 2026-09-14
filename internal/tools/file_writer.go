@@ -60,7 +60,7 @@ func (w *FileWriter) Execute(_ context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("文件路径必须是工作区内的相对路径: %q", input.Path)
 	}
 
-	// 拼接完整路径 ( 限制在 workspace 下执行，防止大模型修改系统级文件 )。
+	// 拼接完整路径 ( 限制在 workspace 下执行，防止模型修改系统级文件 )。
 	fullPath := filepath.Join(w.workspace, input.Path)
 
 	// 自动创建缺失的父目录。

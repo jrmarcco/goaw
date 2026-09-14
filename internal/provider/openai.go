@@ -106,7 +106,7 @@ func (p *OpenAIProvider) transContextMessage(msgs []schema.Message) []openai.Cha
 				}
 			}
 
-			// 如果历史包含 ToolCalls 必须原样放回，以维系大模型的逻辑链
+			// 如果历史包含 ToolCalls 必须原样放回，以维系模型的逻辑链
 			if len(msg.ToolCalls) > 0 {
 				toolCalls := make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(msg.ToolCalls))
 

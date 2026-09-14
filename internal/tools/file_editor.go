@@ -145,7 +145,7 @@ func (e *FileEditor) fuzzyReplace(oriContent, oldContent, newContent string) (st
 		}
 	}
 
-	// L4: 核心容错 ( 消除大模型遗漏缩进的幻觉 )。
+	// L4: 核心容错 ( 消除模型遗漏缩进的幻觉 )。
 	// 逐行去缩进匹配。
 	return e.lineByLineReplace(normalizedContent, normalizedOld, newContent)
 }

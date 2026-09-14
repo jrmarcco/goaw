@@ -17,14 +17,14 @@ const (
 
 // Tool 工具的通用接口。
 type Tool interface {
-	// Name 返回工具的全局唯一名称 ( 大模型通过 Name 调用工具 )。
+	// Name 返回工具的全局唯一名称 ( 模型通过 Name 调用工具 )。
 	Name() string
 
 	// Definition 返回工具的定义。
-	// 包含提交给大模型的工具元数据和参数 JSON Schema。
+	// 包含提交给模型的工具元数据和参数 JSON Schema。
 	Definition() schema.ToolDef
 
-	// Execute 执行工具并返回结果 ( 参数由大模型传入 )。
+	// Execute 执行工具并返回结果 ( 参数由模型传入 )。
 	// 注意：
 	//	参数是 json.RawMessage，反序列化工作用具具体实现决定。
 	Execute(ctx context.Context, args json.RawMessage) (string, error)

@@ -72,7 +72,7 @@ func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (strin
 
 	// 在 MacOS/Linux 上通过将命令包在 `bash -c`　中执行，以支持环境变量、管道、逻辑运算等复杂 Shell 特性。
 
-	//nolint:gosec // G204: Bash Executor的职责就是执行大模型给出的任意命令，命令内容必然是外部输入。
+	//nolint:gosec // G204: Bash Executor的职责就是执行模型给出的任意命令，命令内容必然是外部输入。
 	cmd := exec.CommandContext(timeoutCtx, "bash", "-c", input.Command)
 
 	// 设置工作区目录，确保命令在工作区下执行。
@@ -82,14 +82,14 @@ func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (strin
 	out, err := cmd.CombinedOutput()
 
 	if timeoutCtx.Err() != nil {
-		// 命令执行超时，返回告警给大模型。
+		// 命令执行超时，返回告警给模型。
 		return fmt.Sprintf("%s\n[Warning: 命令执行超时(%s)，已强制终止。]", out, e.timeout), nil
 	}
 
 	// 错误回传 ( Self-Correction 自愈机制 )。
 	// 注意:
 	//  当 bash 报错时绝对不能反悔 Go 的 error 阻断程序。
-	//  必须把 err 和 output 一起返回给大模型，让大模型的自纠能力分析报错。
+	//  必须把 err 和 output 一起返回给模型，让模型的自纠能力分析报错。
 	if err != nil {
 		return fmt.Sprintf("命令执行失败: %v\n输出: \n%s", err, out), nil
 	}
