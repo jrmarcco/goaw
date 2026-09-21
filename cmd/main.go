@@ -6,9 +6,11 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/jrmarcco/goaw/internal/engine"
 	"github.com/jrmarcco/goaw/internal/provider"
+	"github.com/jrmarcco/goaw/internal/reporter"
 	"github.com/jrmarcco/goaw/internal/tools"
 	"go.uber.org/zap"
 	"go.uber.org/zap/exp/zapslog"
@@ -40,11 +42,45 @@ func main() {
 
 	eng, _ := engine.NewAgentEngine(workspace, llmProvider, toolRegistry, true)
 
-	prompt := `
-	当前目录下有 a.txt, b.txt, c.txt 三个文件。
-	为了节省时间，请你同时一次性读取这三个文件，并将它们的内容综合起来，告诉我它们分别记录了什么领域的信息。
-	`
-	if err := eng.Run(context.Background(), prompt); err != nil {
-		log.Fatalf("engine crash: %v", err)
+	go func() {
+		bot, err := createFeishuBot(eng)
+		if err != nil {
+			slog.Error("failed to create feishu bot", "error", err)
+			return
+		}
+		slog.Info("feishu bot created successfully")
+
+		err = startFeishuBot(bot)
+		if err != nil {
+			slog.Error("failed to start feishu bot", "error", err)
+			return
+		}
+		slog.Info("feishu bot started successfully")
+	}()
+}
+
+func createFeishuBot(eng *engine.AgentEngine) (*reporter.FeishuBot, error) {
+	appID := os.Getenv("FEISHU_APP_ID")
+	appSecret := os.Getenv("FEISHU_APP_SECRET")
+
+	bot, err := reporter.NewFeishuBot(appID, appSecret, eng)
+	if err != nil {
+		return nil, err
 	}
+
+	return bot, nil
+}
+
+func startFeishuBot(bot *reporter.FeishuBot) error {
+	eventEncryptKey := os.Getenv("FEISHU_EVENT_ENCRYPT_KEY")
+	verificationToken := os.Getenv("FEISHU_VERIFICATION_TOKEN")
+
+	const botStartTimeout = 10 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), botStartTimeout)
+	defer cancel()
+
+	if err := bot.StartWithWebSocket(ctx, eventEncryptKey, verificationToken); err != nil {
+		return err
+	}
+	return nil
 }
