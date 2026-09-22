@@ -6,8 +6,8 @@ import "encoding/json"
 type Role string
 
 const (
-	RoleSys       Role = "sys"       // 系统提示词
 	RoleUser      Role = "user"      // 用户输入 / 工具执行的返回结果 ( Observation )
+	RoleSystem    Role = "system"    // 系统提示词
 	RoleAssistant Role = "assistant" // LLM 的输出 ( 包含推理和工具调用 )
 )
 

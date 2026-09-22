@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,9 +72,7 @@ func (e *FileEditor) Execute(_ context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("打开工作区失败: %w", err)
 	}
 	defer func() {
-		if closeErr := root.Close(); closeErr != nil {
-			slog.Error("[file reader] 关闭工作区失败", "error", closeErr)
-		}
+		_ = root.Close()
 	}()
 
 	file, err := root.Open(input.Path)
@@ -83,9 +80,7 @@ func (e *FileEditor) Execute(_ context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("打开文件失败: %w", err)
 	}
 	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
-			slog.Error("[file reader] 关闭文件失败", "error", closeErr)
-		}
+		_ = file.Close()
 	}()
 
 	// 读取文件内容。

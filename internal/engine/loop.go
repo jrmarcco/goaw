@@ -223,11 +223,11 @@ func (e *AgentEngine) execToolCall(
 func initContext(userPrompt string) []schema.Message {
 	return []schema.Message{
 		{
-			Role:    schema.RoleSys,
+			Role:    schema.RoleSystem,
 			Content: "You are Goaw, an expert coding assistant. You have full access to tools in the workspace.",
 		},
 		{
-			Role:    schema.RoleSys,
+			Role:    schema.RoleSystem,
 			Content: "I need you anwser in Chinese.",
 		},
 		{

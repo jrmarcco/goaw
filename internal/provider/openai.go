@@ -87,7 +87,7 @@ func (p *OpenAIProvider) transContextMessage(msgs []schema.Message) []openai.Cha
 
 	for _, msg := range msgs {
 		switch msg.Role {
-		case schema.RoleSys:
+		case schema.RoleSystem:
 			openaiMsgs = append(openaiMsgs, openai.SystemMessage(msg.Content))
 
 		case schema.RoleUser:
