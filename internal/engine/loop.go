@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	icontext "github.com/jrmarcco/goaw/internal/context"
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
@@ -12,10 +13,12 @@ import (
 )
 
 type AgentEngine struct {
-	Workspace string // 工作区路径。
+	workspace string // 工作区路径。
 
 	provider provider.LLMProvider
 	registry tools.Registry
+
+	composer *icontext.PromptComposer
 
 	enableThinking bool // 是否启用思考。
 }
@@ -27,10 +30,12 @@ func NewAgentEngine(
 	enableThinking bool,
 ) (*AgentEngine, error) {
 	return &AgentEngine{
-		Workspace: workspace,
+		workspace: workspace,
 
 		provider: llmProvider,
 		registry: toolRegistry,
+
+		composer: icontext.NewPromptComposer(workspace),
 
 		enableThinking: enableThinking,
 	}, nil
@@ -41,10 +46,19 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string, reporter Repor
 		return err
 	}
 
-	slog.Info("[engine] Agent 引擎启动, 锁定工作区", "workspace", e.Workspace)
+	slog.Info("[engine] Agent 引擎启动, 锁定工作区", "workspace", e.workspace)
 	slog.Info("[engine] 慢思考模式", "enabled", e.enableThinking)
 
-	contextHistory := initContext(userPrompt)
+	systemMessage, err := e.composer.Build()
+	if err != nil {
+		return fmt.Errorf("failed to build system message: %w", err)
+	}
+
+	contextHistory := []schema.Message{
+		systemMessage,
+		{Role: schema.RoleUser, Content: userPrompt},
+	}
+
 	for turn := 1; ; turn++ {
 		nextHistory, done, err := e.runTurn(ctx, contextHistory, reporter, turn)
 		if err != nil {
@@ -218,23 +232,6 @@ func (e *AgentEngine) execToolCall(
 		Content:    result.Output,
 		ToolCallID: toolCall.ID,
 	}, nil
-}
-
-func initContext(userPrompt string) []schema.Message {
-	return []schema.Message{
-		{
-			Role:    schema.RoleSystem,
-			Content: "You are Goaw, an expert coding assistant. You have full access to tools in the workspace.",
-		},
-		{
-			Role:    schema.RoleSystem,
-			Content: "I need you anwser in Chinese.",
-		},
-		{
-			Role:    schema.RoleUser,
-			Content: userPrompt,
-		},
-	}
 }
 
 func checkCanceled(ctx context.Context) error {
