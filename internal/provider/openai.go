@@ -16,8 +16,8 @@ import (
 var _ LLMProvider = (*OpenAIProvider)(nil)
 
 type OpenAIProvider struct {
-	client openai.Client
 	model  string
+	client openai.Client
 }
 
 func NewOpenAIV3Provider(model string) (*OpenAIProvider, error) {
@@ -29,14 +29,14 @@ func NewOpenAIV3Provider(model string) (*OpenAIProvider, error) {
 	baseURL := os.Getenv("OPENAI_BASE_URL")
 	if baseURL != "" {
 		return &OpenAIProvider{
-			client: openai.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL)),
 			model:  model,
+			client: openai.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL)),
 		}, nil
 	}
 
 	return &OpenAIProvider{
-		client: openai.NewClient(option.WithAPIKey(apiKey)),
 		model:  model,
+		client: openai.NewClient(option.WithAPIKey(apiKey)),
 	}, nil
 }
 
@@ -81,7 +81,7 @@ func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, av
 	return res, nil
 }
 
-// transToolMessage 翻译上下文消息。
+// transToolMessage 转换上下文消息。
 func (p *OpenAIProvider) transContextMessage(msgs []schema.Message) []openai.ChatCompletionMessageParamUnion {
 	openaiMsgs := make([]openai.ChatCompletionMessageParamUnion, 0, len(msgs))
 
@@ -136,7 +136,7 @@ func (p *OpenAIProvider) transContextMessage(msgs []schema.Message) []openai.Cha
 	return openaiMsgs
 }
 
-// transToolDef 翻译工具定义。
+// transToolDef 转换工具定义。
 func (p *OpenAIProvider) transToolDef(toolDefs []schema.ToolDefinition) []openai.ChatCompletionToolUnionParam {
 	openaiTools := make([]openai.ChatCompletionToolUnionParam, 0, len(toolDefs))
 
