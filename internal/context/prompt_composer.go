@@ -15,10 +15,14 @@ type PromptComposer struct {
 	skillLoader *SkillLoader
 }
 
-func NewPromptComposer(workspace string) *PromptComposer {
+func NewPromptComposer(workspace string, loaders ...*SkillLoader) *PromptComposer {
+	loader := NewSkillLoader(workspace)
+	if len(loaders) > 0 && loaders[0] != nil {
+		loader = loaders[0]
+	}
 	return &PromptComposer{
 		workspace:   workspace,
-		skillLoader: NewSkillLoader(workspace),
+		skillLoader: loader,
 	}
 }
 
@@ -74,13 +78,17 @@ func (c *PromptComposer) Build() (schema.Message, error) {
 	builder.WriteString(string(content))
 	builder.WriteString("\n```\n")
 
-	// 3.动态挂载技能外挂 ( skills )。
-	skillsContent, err := c.skillLoader.Load()
+	// 3.只挂载技能索引；正文由 skill_reader 在需要时按需读取。
+	skills, err := c.skillLoader.List()
 	if err != nil {
-		return schema.Message{}, fmt.Errorf("failed to load skills: %w", err)
+		return schema.Message{}, fmt.Errorf("failed to list skills: %w", err)
 	}
-	if skillsContent != "" {
-		builder.WriteString(skillsContent)
+	if len(skills) > 0 {
+		builder.WriteString("\n# 可选专业技能 (Agent Skills)\n")
+		builder.WriteString("以下仅是技能索引。任务符合 description 时，必须先调用 skill_reader 获取完整执行指南；不要仅凭索引猜测技能内容。\n")
+		for _, skill := range skills {
+			fmt.Fprintf(&builder, "- `%s`: %s\n", skill.Name, skill.Description)
+		}
 	}
 
 	return schema.Message{

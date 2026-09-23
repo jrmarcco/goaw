@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
+	"sync"
 
 	"github.com/jrmarcco/goaw/internal/schema"
 )
@@ -46,19 +48,42 @@ var _ Registry = (*DefaultRegistry)(nil)
 
 // DefaultRegistry 默认的工具注册器实现。
 type DefaultRegistry struct {
+	mu    sync.RWMutex
 	tools map[string]Tool
+	order []string
 }
 
-func NewDefaultRegistry() *DefaultRegistry {
-	return &DefaultRegistry{
+func NewDefaultRegistry(initialTools ...Tool) *DefaultRegistry {
+	registry := &DefaultRegistry{
 		tools: make(map[string]Tool),
+		order: make([]string, 0, len(initialTools)),
 	}
+	for _, tool := range initialTools {
+		if err := registry.Register(tool); err != nil {
+			slog.Error("[tool registry] 初始工具注册失败", "error", err)
+		}
+	}
+	return registry
 }
 
 func (r *DefaultRegistry) Register(tool Tool) error {
-	name := tool.Name()
+	if tool == nil {
+		return fmt.Errorf("工具不能为空")
+	}
+	name := strings.TrimSpace(tool.Name())
+	if name == "" {
+		return fmt.Errorf("工具名称不能为空")
+	}
+	if definitionName := tool.Definition().Name; definitionName != name {
+		return fmt.Errorf("工具名称 %q 与定义名称 %q 不一致", name, definitionName)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if _, exists := r.tools[name]; exists {
 		slog.Warn("[tool registry] 工具已经被注册，将执行覆盖操作。", "name", name)
+	} else {
+		r.order = append(r.order, name)
 	}
 
 	r.tools[name] = tool
@@ -67,16 +92,21 @@ func (r *DefaultRegistry) Register(tool Tool) error {
 }
 
 func (r *DefaultRegistry) GetAvailableTools() []schema.ToolDefinition {
-	tds := make([]schema.ToolDefinition, 0, len(r.tools))
-	for _, tool := range r.tools {
-		tds = append(tds, tool.Definition())
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	tds := make([]schema.ToolDefinition, 0, len(r.order))
+	for _, name := range r.order {
+		tds = append(tds, r.tools[name].Definition())
 	}
 	return tds
 }
 
 func (r *DefaultRegistry) Execute(ctx context.Context, call schema.ToolCall) schema.ToolCallResult {
 	// 路由查找。
+	r.mu.RLock()
 	tool, ok := r.tools[call.Name]
+	r.mu.RUnlock()
 	if !ok {
 		// 找不到工具。
 		// 这是因为模型产生了幻觉，直接跑出错误。

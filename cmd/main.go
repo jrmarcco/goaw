@@ -33,14 +33,17 @@ func main() {
 		log.Fatalf("failed to create provider: %v", err)
 	}
 
-	toolRegistry := tools.NewDefaultRegistry()
+	toolRegistry := tools.NewDefaultRegistry(
+		tools.NewFileReader(workspace),
+		tools.NewFileWriter(workspace),
+		tools.NewFileEditor(workspace),
+		tools.NewBashExecutor(workspace),
+	)
 
-	_ = toolRegistry.Register(tools.NewFileReader(workspace))
-	_ = toolRegistry.Register(tools.NewFileWriter(workspace))
-	_ = toolRegistry.Register(tools.NewFileEditor(workspace))
-	_ = toolRegistry.Register(tools.NewBashExecutor(workspace))
-
-	eng, _ := engine.NewAgentEngine(workspace, llmProvider, toolRegistry, true)
+	eng, err := engine.NewAgentEngine(workspace, llmProvider, toolRegistry, true)
+	if err != nil {
+		log.Fatalf("failed to create agent engine: %v", err)
+	}
 
 	go func() {
 		bot, err := createFeishuBot(eng)

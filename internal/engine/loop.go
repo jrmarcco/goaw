@@ -29,13 +29,22 @@ func NewAgentEngine(
 	toolRegistry tools.Registry,
 	enableThinking bool,
 ) (*AgentEngine, error) {
+	if toolRegistry == nil {
+		return nil, fmt.Errorf("tool registry is required")
+	}
+
+	skillLoader := icontext.NewSkillLoader(workspace)
+	if err := toolRegistry.Register(tools.NewSkillReader(skillLoader)); err != nil {
+		return nil, fmt.Errorf("failed to register skill reader: %w", err)
+	}
+
 	return &AgentEngine{
 		workspace: workspace,
 
 		provider: llmProvider,
 		registry: toolRegistry,
 
-		composer: icontext.NewPromptComposer(workspace),
+		composer: icontext.NewPromptComposer(workspace, skillLoader),
 
 		enableThinking: enableThinking,
 	}, nil
