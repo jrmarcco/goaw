@@ -40,7 +40,7 @@ func NewOpenAIV3Provider(model string) (*OpenAIProvider, error) {
 	}, nil
 }
 
-func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDef) (*schema.Message, error) {
+func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
 	openaiMsgs := p.transContextMessage(msgs)
 
 	params := openai.ChatCompletionNewParams{
@@ -137,7 +137,7 @@ func (p *OpenAIProvider) transContextMessage(msgs []schema.Message) []openai.Cha
 }
 
 // transToolDef 翻译工具定义。
-func (p *OpenAIProvider) transToolDef(toolDefs []schema.ToolDef) []openai.ChatCompletionToolUnionParam {
+func (p *OpenAIProvider) transToolDef(toolDefs []schema.ToolDefinition) []openai.ChatCompletionToolUnionParam {
 	openaiTools := make([]openai.ChatCompletionToolUnionParam, 0, len(toolDefs))
 
 	for i := range toolDefs {

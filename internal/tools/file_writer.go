@@ -26,11 +26,11 @@ func (w *FileWriter) Name() string {
 	return "file_writer"
 }
 
-func (w *FileWriter) Definition() schema.ToolDef {
+func (w *FileWriter) Definition() schema.ToolDefinition {
 	const propNamePath = "path"
 	const propNameContent = "content"
 
-	return schema.ToolDef{
+	return schema.ToolDefinition{
 		Name:        w.Name(),
 		Description: "创建或覆盖指定路径的文件，请提供工作目录内的相对路径。",
 		InputSchema: map[string]any{

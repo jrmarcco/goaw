@@ -27,10 +27,10 @@ func (r *FileReader) Name() string {
 	return "file_reader"
 }
 
-func (r *FileReader) Definition() schema.ToolDef {
+func (r *FileReader) Definition() schema.ToolDefinition {
 	const propNamePath = "path"
 
-	return schema.ToolDef{
+	return schema.ToolDefinition{
 		Name:        r.Name(),
 		Description: "读取指定路径的文件内容，请提供工作目录内的相对路径。",
 		InputSchema: map[string]any{

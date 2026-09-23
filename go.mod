@@ -5,7 +5,7 @@ go 1.27
 require (
 	github.com/jrmarcco/jit v0.0.8
 	github.com/larksuite/oapi-sdk-go/v3 v3.12.0
-	github.com/openai/openai-go/v3 v3.64.3
+	github.com/openai/openai-go/v3 v3.66.0
 	go.uber.org/zap v1.28.0
 	go.uber.org/zap/exp v0.3.0
 	golang.org/x/sync v0.23.0

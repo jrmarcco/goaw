@@ -7,5 +7,5 @@ import (
 )
 
 type LLMProvider interface {
-	Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDef) (*schema.Message, error)
+	Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error)
 }

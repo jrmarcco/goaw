@@ -20,7 +20,7 @@ func NewMockProvider() *MockProvider {
 func (p *MockProvider) Generate(
 	_ context.Context,
 	_ []schema.Message,
-	tools []schema.ToolDef,
+	tools []schema.ToolDefinition,
 ) (*schema.Message, error) {
 	if len(tools) == 0 {
 		return &schema.Message{

@@ -28,12 +28,12 @@ func (e *FileEditor) Name() string {
 	return "file_editor"
 }
 
-func (e *FileEditor) Definition() schema.ToolDef {
+func (e *FileEditor) Definition() schema.ToolDefinition {
 	const propNamePath = "path"
 	const propNameOldContent = "old_content"
 	const propNameNewContent = "new_content"
 
-	return schema.ToolDef{
+	return schema.ToolDefinition{
 		Name:        e.Name(),
 		Description: "对指定文件进行局部内容（字符串）替换，比重写整个文件更安全、更快速。需要提供足够的 old_content 上下文以确保匹配的唯一性。",
 		InputSchema: map[string]any{

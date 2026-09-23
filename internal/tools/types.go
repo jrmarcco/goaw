@@ -22,7 +22,7 @@ type Tool interface {
 
 	// Definition 返回工具的定义。
 	// 包含提交给模型的工具元数据和参数 JSON Schema。
-	Definition() schema.ToolDef
+	Definition() schema.ToolDefinition
 
 	// Execute 执行工具并返回结果 ( 参数由模型传入 )。
 	// 注意：
@@ -36,10 +36,10 @@ type Registry interface {
 	Register(tool Tool) error
 
 	// GetAvailableTools 返回所有当前系统挂在的所有可用的工具。
-	GetAvailableTools() []schema.ToolDef
+	GetAvailableTools() []schema.ToolDefinition
 
 	// Execute 执行一个工具调用并返回结果。
-	Execute(ctx context.Context, call schema.ToolCall) schema.ToolCallRes
+	Execute(ctx context.Context, call schema.ToolCall) schema.ToolCallResult
 }
 
 var _ Registry = (*DefaultRegistry)(nil)
@@ -66,21 +66,21 @@ func (r *DefaultRegistry) Register(tool Tool) error {
 	return nil
 }
 
-func (r *DefaultRegistry) GetAvailableTools() []schema.ToolDef {
-	tds := make([]schema.ToolDef, 0, len(r.tools))
+func (r *DefaultRegistry) GetAvailableTools() []schema.ToolDefinition {
+	tds := make([]schema.ToolDefinition, 0, len(r.tools))
 	for _, tool := range r.tools {
 		tds = append(tds, tool.Definition())
 	}
 	return tds
 }
 
-func (r *DefaultRegistry) Execute(ctx context.Context, call schema.ToolCall) schema.ToolCallRes {
+func (r *DefaultRegistry) Execute(ctx context.Context, call schema.ToolCall) schema.ToolCallResult {
 	// 路由查找。
 	tool, ok := r.tools[call.Name]
 	if !ok {
 		// 找不到工具。
 		// 这是因为模型产生了幻觉，直接跑出错误。
-		return schema.ToolCallRes{
+		return schema.ToolCallResult{
 			ID:      call.ID,
 			Output:  fmt.Sprintf("工具 %s 未注册", call.Name),
 			IsError: true,
@@ -90,14 +90,14 @@ func (r *DefaultRegistry) Execute(ctx context.Context, call schema.ToolCall) sch
 	// 执行工具。
 	output, err := tool.Execute(ctx, call.Args)
 	if err != nil {
-		return schema.ToolCallRes{
+		return schema.ToolCallResult{
 			ID:      call.ID,
 			Output:  fmt.Sprintf("工具 %s 执行失败: %v", call.Name, err),
 			IsError: true,
 		}
 	}
 
-	return schema.ToolCallRes{
+	return schema.ToolCallResult{
 		ID:      call.ID,
 		Output:  output,
 		IsError: false,

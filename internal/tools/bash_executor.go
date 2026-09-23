@@ -42,10 +42,10 @@ func (e *BashExecutor) Name() string {
 	return "bash"
 }
 
-func (e *BashExecutor) Definition() schema.ToolDef {
+func (e *BashExecutor) Definition() schema.ToolDefinition {
 	const propNameCommand = "command"
 
-	return schema.ToolDef{
+	return schema.ToolDefinition{
 		Name:        e.Name(),
 		Description: "在当前工作区执行 bash 命令，支持链式命令(如 &&)。返回标准输出(stdout)。",
 		InputSchema: map[string]any{

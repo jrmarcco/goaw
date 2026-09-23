@@ -20,8 +20,8 @@ type Message struct {
 	ToolCallID string     `json:"toolCallId,omitempty"`
 }
 
-// ToolDef 是工具的定义，描述了一个 LLM 可以调用的工具元信息 ( 让 LLM 理解工具 )。
-type ToolDef struct {
+// ToolDefinition 是工具的定义，描述了一个 LLM 可以调用的工具元信息 ( 让 LLM 理解工具 )。
+type ToolDefinition struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	InputSchema any    `json:"inputSchema"` // 对应 JSON Schema
@@ -34,8 +34,8 @@ type ToolCall struct {
 	Args json.RawMessage `json:"args"` // 对应工具的输入参数 ( RawMessage 的解析交给具体的工具 )
 }
 
-// ToolCallRes 是工具调用的返回结果。
-type ToolCallRes struct {
+// ToolCallResult 是工具调用的返回结果。
+type ToolCallResult struct {
 	ID      string `json:"id"`
 	Output  string `json:"output"`
 	IsError bool   `json:"isError,omitempty"`
