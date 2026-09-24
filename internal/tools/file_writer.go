@@ -61,15 +61,15 @@ func (w *FileWriter) Execute(_ context.Context, args json.RawMessage) (string, e
 	}
 
 	// 拼接完整路径 ( 限制在 workspace 下执行，防止模型修改系统级文件 )。
-	fullPath := filepath.Join(w.workspace, input.Path)
+	fullpath := filepath.Join(w.workspace, input.Path)
 
 	// 自动创建缺失的父目录。
-	if err := os.MkdirAll(filepath.Dir(fullPath), dirPerm); err != nil {
+	if err := os.MkdirAll(filepath.Dir(fullpath), dirPerm); err != nil {
 		return "", fmt.Errorf("创建父目录失败: %w", err)
 	}
 
 	// 写入文件内容。
-	err := os.WriteFile(fullPath, []byte(input.Content), filePerm)
+	err := os.WriteFile(fullpath, []byte(input.Content), filePerm)
 	if err != nil {
 		return "", fmt.Errorf("写入文件失败: %w", err)
 	}

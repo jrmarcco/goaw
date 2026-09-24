@@ -27,8 +27,9 @@ func main() {
 	fmt.Println("🚀 Welcome to goaw!")
 
 	workspace, _ := os.Getwd()
+	// workspace = filepath.Join(workspace, "tmp")
 
-	llmProvider, err := provider.NewOpenAIV3Provider("glm-4.5-air")
+	llmProvider, err := provider.NewAnthropicProvider("glm-5.3-flash")
 	if err != nil {
 		log.Fatalf("failed to create provider: %v", err)
 	}
@@ -40,7 +41,7 @@ func main() {
 		tools.NewBashExecutor(workspace),
 	)
 
-	eng, err := engine.NewAgentEngine(workspace, llmProvider, toolRegistry, true)
+	eng, err := engine.NewAgentEngine(workspace, llmProvider, toolRegistry, false)
 	if err != nil {
 		log.Fatalf("failed to create agent engine: %v", err)
 	}
@@ -60,6 +61,14 @@ func main() {
 		}
 		slog.Info("feishu bot started successfully")
 	}()
+
+	// prompt := `
+	// 在当前目录下增加一个 ip.go 文件，文件内容如下：
+	// 提供一个简单的获取当前 IP 地址的接口。
+	// 写完之后，帮我把代码用 git 提交一下。 `
+	// if err = eng.Run(context.Background(), prompt, reporter.NewTerminalReporter()); err != nil {
+	// 	log.Fatalf("failed to run agent engine: %v", err)
+	// }
 }
 
 func createFeishuBot(eng *engine.AgentEngine) (*reporter.FeishuBot, error) {
