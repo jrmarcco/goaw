@@ -41,7 +41,7 @@ func main() {
 		tools.NewBashExecutor(workspace),
 	)
 
-	eng, err := engine.NewAgentEngine(workspace, llmProvider, toolRegistry, false)
+	eng, err := engine.NewAgentEngine(workspace, llmProvider, toolRegistry, true)
 	if err != nil {
 		log.Fatalf("failed to create agent engine: %v", err)
 	}
