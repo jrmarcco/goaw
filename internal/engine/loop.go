@@ -37,7 +37,6 @@ func NewAgentEngine(
 
 	return &AgentEngine{
 		provider: llmProvider,
-
 		registry: toolRegistry,
 
 		enableThinking: enableThinking,
@@ -133,11 +132,13 @@ func (e *AgentEngine) runTurn(
 }
 
 // buildRequestHistory 组装一次模型调用的请求上下文:
-// System Prompt + 会话工作记忆，再经会话级 Compactor 自适应压缩。
-// 工作记忆暂不设条数与 Token 预算，上下文压力统一交给 Compactor
-// 基于真实 Token 水位线处理，避免硬截断丢弃 Compactor 本可仅掩码的内容。
+//
+//	System Prompt + 会话工作记忆，再经会话级 Compactor 自适应压缩。
+//	工作记忆暂不设条数与 Token 预算，
+//	上下文压力统一交给 Compactor 基于真实 Token 水位线处理，
+//	避免硬截断丢弃 Compactor 本可仅掩码的内容。
 func (e *AgentEngine) buildRequestHistory(systemMessage schema.Message, sess *Session) []schema.Message {
-	workingMemory := sess.GetWorkingMemory(0, 0)
+	workingMemory := sess.GetWorkingMemory(0)
 	history := make([]schema.Message, 0, len(workingMemory)+1)
 	history = append(history, systemMessage)
 	history = append(history, workingMemory...)
