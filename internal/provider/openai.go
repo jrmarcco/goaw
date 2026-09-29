@@ -40,7 +40,7 @@ func NewOpenAIV3Provider(model string) (*OpenAIProvider, error) {
 	}, nil
 }
 
-func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
+func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Generation, error) {
 	openaiMsgs := p.transContextMessage(msgs)
 
 	params := openai.ChatCompletionNewParams{
@@ -62,15 +62,22 @@ func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, av
 	}
 
 	choice := resp.Choices[0].Message
-	res := &schema.Message{
-		Role:    schema.RoleAssistant,
-		Content: choice.Content,
+	res := &schema.Generation{
+		Message: schema.Message{
+			Role:    schema.RoleAssistant,
+			Content: choice.Content,
+		},
+		// PromptTokens 已包含缓存命中的部分 ( PromptTokensDetails.CachedTokens 是其子集 )。
+		Usage: schema.Usage{
+			PromptTokens:     int(resp.Usage.PromptTokens),
+			CompletionTokens: int(resp.Usage.CompletionTokens),
+		},
 	}
 
 	for i := range choice.ToolCalls {
 		tc := &choice.ToolCalls[i]
 		if tc.Type == "function" {
-			res.ToolCalls = append(res.ToolCalls, schema.ToolCall{
+			res.Message.ToolCalls = append(res.Message.ToolCalls, schema.ToolCall{
 				ID:   tc.ID,
 				Name: tc.Function.Name,
 				Args: []byte(tc.Function.Arguments),

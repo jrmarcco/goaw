@@ -39,7 +39,7 @@ func NewAnthropicProvider(model string) (*AnthropicProvider, error) {
 	}, nil
 }
 
-func (p *AnthropicProvider) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
+func (p *AnthropicProvider) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Generation, error) {
 	// 1.解析上下文消息。
 	systemPrompt, anthropicMsgs := p.transContextMessage(msgs)
 
@@ -70,8 +70,10 @@ func (p *AnthropicProvider) Generate(ctx context.Context, msgs []schema.Message,
 	}
 
 	// 4.解析响应信息。
-	res := &schema.Message{
-		Role: schema.RoleAssistant,
+	res := &schema.Generation{
+		Message: schema.Message{
+			Role: schema.RoleAssistant,
+		},
 	}
 
 	for i := range resp.Content {
@@ -79,16 +81,24 @@ func (p *AnthropicProvider) Generate(ctx context.Context, msgs []schema.Message,
 
 		switch block.Type {
 		case "text":
-			res.Content += block.Text
+			res.Message.Content += block.Text
 
 		case "tool_use":
-			res.ToolCalls = append(res.ToolCalls, schema.ToolCall{
+			res.Message.ToolCalls = append(res.Message.ToolCalls, schema.ToolCall{
 				ID:   block.ID,
 				Name: block.Name,
 				Args: block.Input,
 			})
 		}
 	}
+
+	// Anthropic 的 input_tokens 只计未命中缓存的部分，
+	// 上下文窗口的真实占用量必须把缓存创建与缓存读取一并加总。
+	res.Usage = schema.Usage{
+		PromptTokens:     int(resp.Usage.InputTokens + resp.Usage.CacheCreationInputTokens + resp.Usage.CacheReadInputTokens),
+		CompletionTokens: int(resp.Usage.OutputTokens),
+	}
+
 	return res, nil
 }
 

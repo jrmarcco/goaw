@@ -40,3 +40,18 @@ type ToolCallResult struct {
 	Output  string `json:"output"`
 	IsError bool   `json:"isError,omitempty"`
 }
+
+// Usage 是一次模型调用的真实资源消耗。
+// 各大模型 API 都会在 Response 的 Usage 字段中回传该数据，
+// 比本地字符估算精确得多 ( 尤其是本地根本统计不到的隐性消耗，
+// 如 System Prompt、工具定义的 Schema 等都会被计入 PromptTokens )。
+type Usage struct {
+	PromptTokens     int // 本次请求消耗的提示词 Token 总数。
+	CompletionTokens int // 本次请求生成的补全 Token 数。
+}
+
+// Generation 是一次模型生成的完整结果: 消息本体 + 真实 Token 消耗。
+type Generation struct {
+	Message Message
+	Usage   Usage
+}

@@ -23,6 +23,17 @@ type AgentEngine struct {
 	enableThinking bool // 是否启用思考。
 }
 
+const (
+	// defaultContextWindow Compactor 使用的上下文窗口缺省值 ( token )。
+	defaultContextWindow = 128_000
+
+	// defaultReserveTokens 为模型单次补全预留的输出空间 ( token )。
+	defaultReserveTokens = 8_192
+
+	// defaultRetainLastMsg Working Memory 保护区的消息条数。
+	defaultRetainLastMsg = 20
+)
+
 func NewAgentEngine(
 	workspace string,
 	llmProvider provider.LLMProvider,
@@ -68,8 +79,12 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string, reporter Repor
 		{Role: schema.RoleUser, Content: userPrompt},
 	}
 
+	// Compactor 跟踪的是单次会话的 Token 水位线。
+	// 随 Run 独立创建，避免并发的会话互相污染校准状态。
+	compactor := icontext.NewCompactor(defaultContextWindow, defaultReserveTokens, defaultRetainLastMsg)
+
 	for turn := 1; ; turn++ {
-		nextHistory, done, err := e.runTurn(ctx, contextHistory, reporter, turn)
+		nextHistory, done, err := e.runTurn(ctx, contextHistory, reporter, turn, compactor)
 		if err != nil {
 			return err
 		}
@@ -85,29 +100,41 @@ func (e *AgentEngine) runTurn(
 	contextHistory []schema.Message,
 	reporter Reporter,
 	turn int,
+	compactor *icontext.Compactor,
 ) ([]schema.Message, bool, error) {
 	if err := checkCanceled(ctx); err != nil {
 		return nil, false, err
 	}
 	slog.Info("[engine] start turn", "turn", turn)
 
-	contextHistory, err := e.think(ctx, contextHistory, reporter)
+	// 发送前先压缩: 用真实 Token 水位线决定是否拦截。
+	contextHistory = compactor.Compact(contextHistory)
+
+	if e.enableThinking {
+		thinkGen, err := e.think(ctx, contextHistory, reporter)
+		if err != nil {
+			return nil, false, err
+		}
+		// 用真实消耗刷新水位线并校准估算系数。
+		compactor.Observe(thinkGen.Usage.PromptTokens)
+		if thinkGen.Message.Content != "" {
+			contextHistory = append(contextHistory, thinkGen.Message)
+		}
+	}
+
+	actGen, err := e.act(ctx, contextHistory, reporter)
 	if err != nil {
 		return nil, false, err
 	}
+	compactor.Observe(actGen.Usage.PromptTokens)
+	contextHistory = append(contextHistory, actGen.Message)
 
-	actionResp, err := e.act(ctx, contextHistory, reporter)
-	if err != nil {
-		return nil, false, err
-	}
-	contextHistory = append(contextHistory, *actionResp)
-
-	if len(actionResp.ToolCalls) == 0 {
+	if len(actGen.Message.ToolCalls) == 0 {
 		slog.Debug("[engine] 模型没有请求工具调用，任务结束。")
 		return contextHistory, true, nil
 	}
 
-	observations, err := e.execToolCalls(ctx, actionResp.ToolCalls, reporter)
+	observations, err := e.execToolCalls(ctx, actGen.Message.ToolCalls, reporter)
 	if err != nil {
 		return nil, false, err
 	}
@@ -119,29 +146,24 @@ func (e *AgentEngine) think(
 	ctx context.Context,
 	contextHistory []schema.Message,
 	reporter Reporter,
-) ([]schema.Message, error) {
-	if !e.enableThinking {
-		return contextHistory, nil
-	}
-
+) (*schema.Generation, error) {
 	slog.Debug("[engine] 剥夺工具访问权，强制进入慢思考与规划阶段...")
 	if reporter != nil {
 		_ = reporter.OnThinking(ctx)
 	}
 
-	thinkResp, err := e.provider.Generate(ctx, contextHistory, nil)
+	thinkGen, err := e.provider.Generate(ctx, contextHistory, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate thinking response: %w", err)
 	}
 	if err := checkCanceled(ctx); err != nil {
 		return nil, err
 	}
-	if thinkResp.Content == "" {
-		return contextHistory, nil
-	}
 
-	slog.Debug("[engine][内部思考] ->", "content", thinkResp.Content)
-	return append(contextHistory, *thinkResp), nil
+	if thinkGen.Message.Content != "" {
+		slog.Debug("[engine][内部思考] ->", "content", thinkGen.Message.Content)
+	}
+	return thinkGen, nil
 }
 
 // act 模型采取行动。
@@ -149,9 +171,9 @@ func (e *AgentEngine) act(
 	ctx context.Context,
 	contextHistory []schema.Message,
 	reporter Reporter,
-) (*schema.Message, error) {
+) (*schema.Generation, error) {
 	slog.Debug("[engine] 恢复工具挂载，等待模型采取行动...")
-	actionResp, err := e.provider.Generate(ctx, contextHistory, e.registry.GetAvailableTools())
+	actGen, err := e.provider.Generate(ctx, contextHistory, e.registry.GetAvailableTools())
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate action response: %w", err)
 	}
@@ -159,16 +181,16 @@ func (e *AgentEngine) act(
 		return nil, err
 	}
 
-	if actionResp.Content != "" {
-		slog.Debug("[engine][对外回复] ->", "content", actionResp.Content)
+	if actGen.Message.Content != "" {
+		slog.Debug("[engine][对外回复] ->", "content", actGen.Message.Content)
 		if reporter != nil {
-			_ = reporter.OnMessage(ctx, actionResp.Content)
+			_ = reporter.OnMessage(ctx, actGen.Message.Content)
 		}
 	}
 	if err := checkCanceled(ctx); err != nil {
 		return nil, err
 	}
-	return actionResp, nil
+	return actGen, nil
 }
 
 // execToolCalls 并发执行工具调用。
