@@ -71,7 +71,6 @@ func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (strin
 	defer cancel()
 
 	// 在 MacOS/Linux 上通过将命令包在 `bash -c`　中执行，以支持环境变量、管道、逻辑运算等复杂 Shell 特性。
-
 	//nolint:gosec // G204: Bash Executor的职责就是执行模型给出的任意命令，命令内容必然是外部输入。
 	cmd := exec.CommandContext(timeoutCtx, "bash", "-c", input.Command)
 

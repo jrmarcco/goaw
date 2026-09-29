@@ -20,18 +20,18 @@ func main() {
 	// 初始化 slog。
 	logger, err := zap.NewDevelopment()
 	if err != nil {
-		log.Fatalf("failed to create logger: %v", err)
+		log.Fatalf("初始化日志器失败: %v", err)
 	}
 	slog.SetDefault(slog.New(zapslog.NewHandler(logger.Core())))
 
-	fmt.Println("🚀 Welcome to goaw!")
+	fmt.Println("🚀 欢迎使用 goaw!")
 
 	workspace, _ := os.Getwd()
 	// workspace = filepath.Join(workspace, "tmp")
 
 	llmProvider, err := provider.NewAnthropicProvider("glm-5.3-flash")
 	if err != nil {
-		log.Fatalf("failed to create provider: %v", err)
+		log.Fatalf("创建模型提供者失败: %v", err)
 	}
 
 	toolRegistry := tools.NewDefaultRegistry(
@@ -43,23 +43,23 @@ func main() {
 
 	eng, err := engine.NewAgentEngine(workspace, llmProvider, toolRegistry, true)
 	if err != nil {
-		log.Fatalf("failed to create agent engine: %v", err)
+		log.Fatalf("创建 Agent 引擎失败: %v", err)
 	}
 
 	go func() {
 		bot, err := createFeishuBot(eng)
 		if err != nil {
-			slog.Error("failed to create feishu bot", "error", err)
+			slog.Error("创建飞书机器人失败", "error", err)
 			return
 		}
-		slog.Info("feishu bot created successfully")
+		slog.Info("飞书机器人创建成功")
 
 		err = startFeishuBot(bot)
 		if err != nil {
-			slog.Error("failed to start feishu bot", "error", err)
+			slog.Error("启动飞书机器人失败", "error", err)
 			return
 		}
-		slog.Info("feishu bot started successfully")
+		slog.Info("飞书机器人启动成功")
 	}()
 
 	// prompt := `
@@ -67,7 +67,7 @@ func main() {
 	// 提供一个简单的获取当前 IP 地址的接口。
 	// 写完之后，帮我把代码用 git 提交一下。 `
 	// if err = eng.Run(context.Background(), prompt, reporter.NewTerminalReporter()); err != nil {
-	// 	log.Fatalf("failed to run agent engine: %v", err)
+	// 	log.Fatalf("运行 Agent 引擎失败: %v", err)
 	// }
 }
 
