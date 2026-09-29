@@ -6,6 +6,12 @@ import (
 	"github.com/jrmarcco/goaw/internal/schema"
 )
 
+// testToolCallID1 测试用 ToolCall 标识。
+const testToolCallID1 = "tc-1"
+
+// testToolCallID2 测试用 ToolCall 标识。
+const testToolCallID2 = "tc-2"
+
 func TestSessionRunGuard(t *testing.T) {
 	t.Parallel()
 
@@ -74,33 +80,96 @@ func TestGetWorkingMemory(t *testing.T) {
 		s := NewSession("s", "w")
 		s.Append(msgs...)
 
-		got := s.GetWorkingMemory(2)
-		if len(got) != 2 {
-			t.Fatalf("GetWorkingMemory(2) returned %d messages, want 2", len(got))
+		// limit=3 的截取点恰好落在 User 消息上，无需回退，严格返回 3 条。
+		got := s.GetWorkingMemory(3)
+		if len(got) != 3 {
+			t.Fatalf("GetWorkingMemory(3) returned %d messages, want 3", len(got))
 		}
-		if got[0].Content != msgs[3].Content || got[1].Content != msgs[4].Content {
-			t.Fatal("GetWorkingMemory(2) did not return the latest 2 messages")
+		if got[0].Content != msgs[2].Content || got[2].Content != msgs[4].Content {
+			t.Fatal("GetWorkingMemory(3) did not return the latest 3 messages")
 		}
 	})
 
-	t.Run("drops orphan tool call results at the head", func(t *testing.T) {
+	t.Run("repairs orphaned tool call results by widening the window", func(t *testing.T) {
 		t.Parallel()
 
 		s := NewSession("s", "w")
 		s.Append(
 			user("early"),
 			asst("call a tool"),
-			schema.Message{Role: schema.RoleUser, Content: "tool output", ToolCallID: "tc-1"},
+			schema.Message{Role: schema.RoleUser, Content: "tool output", ToolCallID: testToolCallID1},
 			user("latest"),
 		)
 
-		// 条数截取后第一条恰好是 ToolCallResult，必须被顺延丢弃。
+		// 条数截取后第一条恰好是 ToolCallResult，
+		// 起点回退补回发出 ToolCall 的父消息与前置用户消息，而不是丢弃孤儿。
 		got := s.GetWorkingMemory(2)
-		if len(got) != 1 {
-			t.Fatalf("GetWorkingMemory(2) returned %d messages, want 1", len(got))
+		if len(got) != 4 {
+			t.Fatalf("GetWorkingMemory(2) returned %d messages, want 4 (widened)", len(got))
 		}
-		if got[0].ToolCallID != "" || got[0].Content != "latest" {
-			t.Fatalf("GetWorkingMemory(2) = %v, want the plain user message", got)
+		if got[0].Content != "early" || got[0].ToolCallID != "" {
+			t.Fatalf("GetWorkingMemory(2) head = %+v, want the plain user message", got[0])
+		}
+		if got[2].ToolCallID != "tc-1" {
+			t.Fatal("the tool call result must stay in the window together with its parent")
+		}
+	})
+
+	t.Run("repairs leading assistant head", func(t *testing.T) {
+		t.Parallel()
+
+		s := NewSession("s", "w")
+		s.Append(
+			user("early"),
+			asst("reply"),
+			user("ask"),
+			schema.Message{
+				Role: schema.RoleAssistant,
+				ToolCalls: []schema.ToolCall{
+					{ID: testToolCallID1, Name: "bash", Args: []byte(`{}`)},
+				},
+			},
+			schema.Message{Role: schema.RoleUser, Content: "output", ToolCallID: testToolCallID1},
+		)
+
+		// limit=2 截取后窗口为 [assistant(tool_calls), tool_result]，
+		// 开头的 Assistant 消息违反"对话以 user 开头"约束，回退到前一条用户消息。
+		got := s.GetWorkingMemory(2)
+		if len(got) != 3 {
+			t.Fatalf("GetWorkingMemory(2) returned %d messages, want 3 (widened)", len(got))
+		}
+		if got[0].Role != schema.RoleUser || got[0].Content != "ask" || got[0].ToolCallID != "" {
+			t.Fatalf("GetWorkingMemory(2) head = %+v, want the plain user message %q", got[0], "ask")
+		}
+		if len(got[1].ToolCalls) != 1 || got[2].ToolCallID != "tc-1" {
+			t.Fatal("the tool call and its result must stay together in the window")
+		}
+	})
+
+	t.Run("all tool result window never returns empty", func(t *testing.T) {
+		t.Parallel()
+
+		s := NewSession("s", "w")
+		s.Append(
+			user("early"),
+			schema.Message{
+				Role: schema.RoleAssistant,
+				ToolCalls: []schema.ToolCall{
+					{ID: testToolCallID1, Name: "bash", Args: []byte(`{}`)},
+					{ID: testToolCallID2, Name: "file_reader", Args: []byte(`{}`)},
+				},
+			},
+			schema.Message{Role: schema.RoleUser, Content: "out-1", ToolCallID: testToolCallID1},
+			schema.Message{Role: schema.RoleUser, Content: "out-2", ToolCallID: testToolCallID2},
+		)
+
+		// limit=2 的窗口全是 ToolCallResult，回退到开场用户消息，窗口不为空。
+		got := s.GetWorkingMemory(2)
+		if len(got) != 4 {
+			t.Fatalf("GetWorkingMemory(2) returned %d messages, want 4 (widened)", len(got))
+		}
+		if got[0].Content != "early" || got[0].ToolCallID != "" {
+			t.Fatalf("window head = %+v, want the opening plain user message", got[0])
 		}
 	})
 }

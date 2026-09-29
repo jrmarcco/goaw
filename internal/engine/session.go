@@ -80,7 +80,16 @@ func (s *Session) Append(msgs ...schema.Message) {
 }
 
 // GetWorkingMemory 获取工作记忆 ( Agent Harness 的核心 )。
-// 返回最近的 N 条消息 ( Agent 的短期工作记忆 )，limit 小于等于 0 表示不限制条数。
+// 返回最近的 limit 条消息 ( Agent 的短期工作记忆 )，limit 小于等于 0 表示不限制条数。
+//
+// 大模型 API 对消息序列的合法性有硬约束:
+//   - ToolCallResult 必须紧跟发出对应 ToolCall 的 Assistant 消息，截断起点落在
+//     两者之间会造出"孤儿结果"，API 直接 400 Bad Request;
+//   - Anthropic 系 API 还要求对话以 user 角色开头，起点落在 Assistant 消息上同样 400。
+//
+// 因此截断起点向前回退 ( 而不是向后丢弃 )，直到落在一条普通 User 消息上，
+// 补回 ToolCall 的父消息与前置的用户消息。序列完整性优先于条数精度，
+// 返回条数可能超过 limit ( 上界为起点到上一条普通 User 消息的距离 )。
 //
 // Token 维度的上下文压力不在这里设防，统一交由 Compactor 基于真实水位线处理，
 // 避免本地估算的硬截断丢弃 Compactor 本可仅掩码的内容。
@@ -96,21 +105,26 @@ func (s *Session) GetWorkingMemory(limit int) []schema.Message {
 		start = historyCnt - limit
 	}
 
+	// 起点向前回退到普通 User 消息:
+	//   - 落在 ToolCallResult 上 → 回退补回发出 ToolCall 的父消息，孤儿自然消除;
+	//   - 落在 Assistant 消息上 → 继续回退，开头必为 user 角色;
+	//   - 窗口内全是 ToolCallResult → 一路回退到 Run 的开场用户消息，不会返回空窗口。
+	// history[0] 由 Run 流程保证是普通用户消息，循环必然终止;
+	// limit 小于等于 0 时 start 恒为 0，循环零开销。
+	for start > 0 && !isPlainUserMessage(s.history[start]) {
+		start--
+	}
+
 	res := make([]schema.Message, historyCnt-start)
 	copy(res, s.history[start:])
-
-	// 大模型 API 对历史消息的连续性有要求。
-	// 如果返回消息的第一条恰好是一个 ToolCallResult ( RoleUser 且含有 ToolCallID )，
-	// 但发出这个请求的 ToolCall 被截断丢弃了，
-	// 那么大模型 API 会直接报错 ( 400 Bad Request )。
-	// 因此必须强制舍弃 ToolCallResult 消息，顺延到下一条正常的 User/Assistant 消息。
-	for len(res) > 0 {
-		if res[0].Role != schema.RoleUser || res[0].ToolCallID == "" {
-			break
-		}
-		res = res[1:]
-	}
 	return res
+}
+
+// isPlainUserMessage 判断是否为普通 User 消息。
+// ToolCallResult ( RoleUser 且含 ToolCallID ) 不算:
+// 它必须跟在对应 ToolCall 之后，不能充当合法的序列开头。
+func isPlainUserMessage(msg schema.Message) bool {
+	return msg.Role == schema.RoleUser && msg.ToolCallID == ""
 }
 
 type SessionManager struct {
