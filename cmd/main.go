@@ -35,19 +35,19 @@ func main() {
 	}
 
 	toolRegistry := tools.NewDefaultRegistry(
-		tools.NewFileReader(workspace),
-		tools.NewFileWriter(workspace),
-		tools.NewFileEditor(workspace),
-		tools.NewBashExecutor(workspace),
+		tools.NewFileReader(),
+		tools.NewFileWriter(),
+		tools.NewFileEditor(),
+		tools.NewBashExecutor(),
 	)
 
-	eng, err := engine.NewAgentEngine(workspace, llmProvider, toolRegistry, true)
+	eng, err := engine.NewAgentEngine(llmProvider, toolRegistry, true)
 	if err != nil {
 		log.Fatalf("创建 Agent 引擎失败: %v", err)
 	}
 
 	go func() {
-		bot, err := createFeishuBot(eng)
+		bot, err := createFeishuBot(eng, workspace)
 		if err != nil {
 			slog.Error("创建飞书机器人失败", "error", err)
 			return
@@ -66,16 +66,17 @@ func main() {
 	// 在当前目录下增加一个 ip.go 文件，文件内容如下：
 	// 提供一个简单的获取当前 IP 地址的接口。
 	// 写完之后，帮我把代码用 git 提交一下。 `
-	// if err = eng.Run(context.Background(), prompt, reporter.NewTerminalReporter()); err != nil {
+	// sess := engine.NewSession("terminal", workspace)
+	// if err = eng.Run(context.Background(), sess, prompt, reporter.NewTerminalReporter()); err != nil {
 	// 	log.Fatalf("运行 Agent 引擎失败: %v", err)
 	// }
 }
 
-func createFeishuBot(eng *engine.AgentEngine) (*reporter.FeishuBot, error) {
+func createFeishuBot(eng *engine.AgentEngine, workspace string) (*reporter.FeishuBot, error) {
 	appID := os.Getenv("FEISHU_APP_ID")
 	appSecret := os.Getenv("FEISHU_APP_SECRET")
 
-	bot, err := reporter.NewFeishuBot(appID, appSecret, eng)
+	bot, err := reporter.NewFeishuBot(appID, appSecret, workspace, eng)
 	if err != nil {
 		return nil, err
 	}

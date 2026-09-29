@@ -14,14 +14,12 @@ import (
 
 var _ Tool = (*FileEditor)(nil)
 
-type FileEditor struct {
-	workspace string
-}
+// FileEditor 对工作区内文件进行局部替换的工具。
+// 工作区路径不随构造绑定，执行时从 context 解析 ( 见 WithWorkspace )。
+type FileEditor struct{}
 
-func NewFileEditor(workspace string) *FileEditor {
-	return &FileEditor{
-		workspace: workspace,
-	}
+func NewFileEditor() *FileEditor {
+	return &FileEditor{}
 }
 
 func (e *FileEditor) Name() string {
@@ -57,9 +55,14 @@ func (e *FileEditor) Definition() schema.ToolDefinition {
 	}
 }
 
-func (e *FileEditor) Execute(_ context.Context, args json.RawMessage) (string, error) {
+func (e *FileEditor) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	workspace, err := WorkspaceFromContext(ctx)
+	if err != nil {
+		return "", err
+	}
+
 	var input fileEditArgs
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err = json.Unmarshal(args, &input); err != nil {
 		return "", fmt.Errorf("解析参数失败: %w", err)
 	}
 
@@ -67,7 +70,7 @@ func (e *FileEditor) Execute(_ context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("文件路径必须是工作区内的相对路径: %q", input.Path)
 	}
 
-	root, err := os.OpenRoot(e.workspace)
+	root, err := os.OpenRoot(workspace)
 	if err != nil {
 		return "", fmt.Errorf("打开工作区失败: %w", err)
 	}
@@ -97,7 +100,7 @@ func (e *FileEditor) Execute(_ context.Context, args json.RawMessage) (string, e
 	}
 
 	// 写入新内容。
-	if err := os.WriteFile(filepath.Join(e.workspace, input.Path), []byte(newContent), filePerm); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, input.Path), []byte(newContent), filePerm); err != nil {
 		return "", fmt.Errorf("写入文件失败: %w", err)
 	}
 

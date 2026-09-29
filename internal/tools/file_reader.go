@@ -13,14 +13,12 @@ import (
 
 var _ Tool = (*FileReader)(nil)
 
-type FileReader struct {
-	workspace string
-}
+// FileReader 读取工作区内文件的工具。
+// 工作区路径不随构造绑定，执行时从 context 解析 ( 见 WithWorkspace )。
+type FileReader struct{}
 
-func NewFileReader(workspace string) *FileReader {
-	return &FileReader{
-		workspace: workspace,
-	}
+func NewFileReader() *FileReader {
+	return &FileReader{}
 }
 
 func (r *FileReader) Name() string {
@@ -46,9 +44,14 @@ func (r *FileReader) Definition() schema.ToolDefinition {
 	}
 }
 
-func (r *FileReader) Execute(_ context.Context, args json.RawMessage) (string, error) {
+func (r *FileReader) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	workspace, err := WorkspaceFromContext(ctx)
+	if err != nil {
+		return "", err
+	}
+
 	var input fileReadArgs
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err = json.Unmarshal(args, &input); err != nil {
 		return "", fmt.Errorf("解析参数失败: %w", err)
 	}
 
@@ -56,7 +59,7 @@ func (r *FileReader) Execute(_ context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("文件路径必须是工作区内的相对路径: %q", input.Path)
 	}
 
-	root, err := os.OpenRoot(r.workspace)
+	root, err := os.OpenRoot(workspace)
 	if err != nil {
 		return "", fmt.Errorf("打开工作区失败: %w", err)
 	}
@@ -79,7 +82,7 @@ func (r *FileReader) Execute(_ context.Context, args json.RawMessage) (string, e
 
 	const MaxLen = 8192
 	if len(content) > MaxLen {
-		fullPath := filepath.Join(r.workspace, input.Path)
+		fullPath := filepath.Join(workspace, input.Path)
 		return fmt.Sprintf("%s\n\n...[文件内容过长，已截断至前 %d 字节]", fullPath, MaxLen), nil
 	}
 

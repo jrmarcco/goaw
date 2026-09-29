@@ -22,6 +22,28 @@ func asciiContentLen(n int) string {
 	return string(out)
 }
 
+func TestSessionRunGuard(t *testing.T) {
+	t.Parallel()
+
+	s := NewSession("s", "w")
+
+	if s.compactor == nil {
+		t.Fatal("NewSession() did not initialize the compactor")
+	}
+
+	if !s.TryStartRun() {
+		t.Fatal("TryStartRun() = false on an idle session")
+	}
+	if s.TryStartRun() {
+		t.Fatal("TryStartRun() = true while a run is in progress")
+	}
+
+	s.EndRun()
+	if !s.TryStartRun() {
+		t.Fatal("TryStartRun() = false after EndRun()")
+	}
+}
+
 func TestGetWorkingMemory(t *testing.T) {
 	t.Parallel()
 

@@ -12,12 +12,11 @@ import (
 var _ Tool = (*SkillReader)(nil)
 
 // SkillReader 按名称披露技能的完整执行指南。
-type SkillReader struct {
-	loader *icontext.SkillLoader
-}
+// 工作区路径不随构造绑定，执行时从 context 解析 ( 见 WithWorkspace )。
+type SkillReader struct{}
 
-func NewSkillReader(loader *icontext.SkillLoader) *SkillReader {
-	return &SkillReader{loader: loader}
+func NewSkillReader() *SkillReader {
+	return &SkillReader{}
 }
 
 func (r *SkillReader) Name() string {
@@ -43,17 +42,19 @@ func (r *SkillReader) Definition() schema.ToolDefinition {
 	}
 }
 
-func (r *SkillReader) Execute(_ context.Context, args json.RawMessage) (string, error) {
-	if r.loader == nil {
-		return "", fmt.Errorf("技能加载器未配置")
+func (r *SkillReader) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	workspace, err := WorkspaceFromContext(ctx)
+	if err != nil {
+		return "", err
 	}
 
 	var input skillReadArgs
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err = json.Unmarshal(args, &input); err != nil {
 		return "", fmt.Errorf("解析参数失败: %w", err)
 	}
 
-	skill, err := r.loader.Read(input.Name)
+	// 技能目录由工作区决定，随调用解析。
+	skill, err := icontext.NewSkillLoader(workspace).Read(input.Name)
 	if err != nil {
 		return "", err
 	}

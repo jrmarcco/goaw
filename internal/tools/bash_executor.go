@@ -13,9 +13,10 @@ import (
 
 var _ Tool = (*BashExecutor)(nil)
 
+// BashExecutor 在工作区目录下执行 bash 命令的工具。
+// 工作区路径不随构造绑定，执行时从 context 解析 ( 见 WithWorkspace )。
 type BashExecutor struct {
-	workspace string
-	timeout   time.Duration
+	timeout time.Duration
 }
 
 func BashExecutorWithTimeout(timeout time.Duration) option.Opt[BashExecutor] {
@@ -24,11 +25,10 @@ func BashExecutorWithTimeout(timeout time.Duration) option.Opt[BashExecutor] {
 	}
 }
 
-func NewBashExecutor(workspace string, opts ...option.Opt[BashExecutor]) *BashExecutor {
+func NewBashExecutor(opts ...option.Opt[BashExecutor]) *BashExecutor {
 	const defaultTimeout = 30 * time.Second // 默认超时时间30秒。
 	bashExecutor := &BashExecutor{
-		workspace: workspace,
-		timeout:   defaultTimeout,
+		timeout: defaultTimeout,
 	}
 
 	if len(opts) > 0 {
@@ -62,8 +62,13 @@ func (e *BashExecutor) Definition() schema.ToolDefinition {
 }
 
 func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	workspace, err := WorkspaceFromContext(ctx)
+	if err != nil {
+		return "", err
+	}
+
 	var input bashArgs
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err = json.Unmarshal(args, &input); err != nil {
 		return "", fmt.Errorf("解析参数失败: %w", err)
 	}
 
@@ -75,7 +80,7 @@ func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (strin
 	cmd := exec.CommandContext(timeoutCtx, "bash", "-c", input.Command)
 
 	// 设置工作区目录，确保命令在工作区下执行。
-	cmd.Dir = e.workspace
+	cmd.Dir = workspace
 
 	// 执行并捕获 CombinedOutput ( stdout + stderr )。
 	out, err := cmd.CombinedOutput()

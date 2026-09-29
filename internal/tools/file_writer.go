@@ -12,14 +12,12 @@ import (
 
 var _ Tool = (*FileWriter)(nil)
 
-type FileWriter struct {
-	workspace string
-}
+// FileWriter 在工作区内创建或覆盖文件的工具。
+// 工作区路径不随构造绑定，执行时从 context 解析 ( 见 WithWorkspace )。
+type FileWriter struct{}
 
-func NewFileWriter(workspace string) *FileWriter {
-	return &FileWriter{
-		workspace: workspace,
-	}
+func NewFileWriter() *FileWriter {
+	return &FileWriter{}
 }
 
 func (w *FileWriter) Name() string {
@@ -50,9 +48,14 @@ func (w *FileWriter) Definition() schema.ToolDefinition {
 	}
 }
 
-func (w *FileWriter) Execute(_ context.Context, args json.RawMessage) (string, error) {
+func (w *FileWriter) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	workspace, err := WorkspaceFromContext(ctx)
+	if err != nil {
+		return "", err
+	}
+
 	var input fileWriteArgs
-	if err := json.Unmarshal(args, &input); err != nil {
+	if err = json.Unmarshal(args, &input); err != nil {
 		return "", fmt.Errorf("解析参数失败: %w", err)
 	}
 
@@ -61,15 +64,15 @@ func (w *FileWriter) Execute(_ context.Context, args json.RawMessage) (string, e
 	}
 
 	// 拼接完整路径 ( 限制在 workspace 下执行，防止模型修改系统级文件 )。
-	fullpath := filepath.Join(w.workspace, input.Path)
+	fullpath := filepath.Join(workspace, input.Path)
 
 	// 自动创建缺失的父目录。
-	if err := os.MkdirAll(filepath.Dir(fullpath), dirPerm); err != nil {
+	if err = os.MkdirAll(filepath.Dir(fullpath), dirPerm); err != nil {
 		return "", fmt.Errorf("创建父目录失败: %w", err)
 	}
 
 	// 写入文件内容。
-	err := os.WriteFile(fullpath, []byte(input.Content), filePerm)
+	err = os.WriteFile(fullpath, []byte(input.Content), filePerm)
 	if err != nil {
 		return "", fmt.Errorf("写入文件失败: %w", err)
 	}

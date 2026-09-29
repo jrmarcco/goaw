@@ -20,15 +20,17 @@ import (
 type FeishuBot struct {
 	appID     string
 	appSecret string
+	workspace string
 
 	agentRunTimeout    time.Duration
 	messageSendTimeout time.Duration
 
-	client *lark.Client
-	engine *engine.AgentEngine
+	client   *lark.Client
+	engine   *engine.AgentEngine
+	sessions *engine.SessionManager
 }
 
-func NewFeishuBot(appID, appSecret string, eng *engine.AgentEngine) (*FeishuBot, error) {
+func NewFeishuBot(appID, appSecret, workspace string, eng *engine.AgentEngine) (*FeishuBot, error) {
 	if appID == "" || appSecret == "" {
 		return nil, fmt.Errorf("appID or appSecret is empty")
 	}
@@ -39,12 +41,14 @@ func NewFeishuBot(appID, appSecret string, eng *engine.AgentEngine) (*FeishuBot,
 	return &FeishuBot{
 		appID:     appID,
 		appSecret: appSecret,
+		workspace: workspace,
 
 		agentRunTimeout:    defaultAgentRunTimeout,
 		messageSendTimeout: defaultMessageSendTimeout,
 
-		client: lark.NewClient(appID, appSecret),
-		engine: eng,
+		client:   lark.NewClient(appID, appSecret),
+		engine:   eng,
+		sessions: engine.NewSessionManager(),
 	}, nil
 }
 
@@ -101,10 +105,13 @@ func (b *FeishuBot) StartWithWebSocket(ctx context.Context, eventEncryptKey, ver
 func (b *FeishuBot) handleAgentRun(ctx context.Context, chatID, prompt string) {
 	reporter := NewFeishuReporter(b.client, chatID)
 
+	// 飞书会话 ( chatID ) 与 Agent 会话一一对应，跨消息累积上下文。
+	sess := b.sessions.Get(chatID, b.workspace)
+
 	agentRunCtx, agentRunCancel := context.WithTimeout(ctx, b.agentRunTimeout)
 	defer agentRunCancel()
 
-	if err := b.engine.Run(agentRunCtx, prompt, reporter); err != nil {
+	if err := b.engine.Run(agentRunCtx, sess, prompt, reporter); err != nil {
 		notifyCtx, notifyCancel := context.WithTimeout(ctx, b.messageSendTimeout)
 		defer notifyCancel()
 

@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	icontext "github.com/jrmarcco/goaw/internal/context"
 )
 
 func TestSkillReaderExecute(t *testing.T) {
@@ -31,8 +29,9 @@ func TestSkillReaderExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reader := NewSkillReader(icontext.NewSkillLoader(workspace))
-	output, err := reader.Execute(context.Background(), []byte(`{"name":"review"}`))
+	reader := NewSkillReader()
+	ctx := WithWorkspace(context.Background(), workspace)
+	output, err := reader.Execute(ctx, []byte(`{"name":"review"}`))
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -46,8 +45,8 @@ func TestDefaultRegistryPreservesRegistrationOrder(t *testing.T) {
 	t.Parallel()
 
 	registry := NewDefaultRegistry(
-		NewFileReader(t.TempDir()),
-		NewSkillReader(icontext.NewSkillLoader(t.TempDir())),
+		NewFileReader(),
+		NewSkillReader(),
 	)
 
 	definitions := registry.GetAvailableTools()

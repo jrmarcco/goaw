@@ -2,13 +2,29 @@ package engine
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
+	icontext "github.com/jrmarcco/goaw/internal/context"
 	"github.com/jrmarcco/goaw/internal/schema"
 )
 
+const (
+	// defaultContextWindow Compactor 使用的上下文窗口缺省值 ( token )。
+	defaultContextWindow = 128_000
+
+	// defaultReserveTokens 为模型单次补全预留的输出空间 ( token )。
+	defaultReserveTokens = 8_192
+
+	// defaultRetainLastMsg Working Memory 保护区的消息条数。
+	defaultRetainLastMsg = 20
+)
+
 // Session 代表一次人机交互过程。
-// 负责维护会话的完整上下文历史。
+// 是 Agent 运行所需环境与状态的唯一载体:
+//   - Workspace: 工具执行范围与 System Prompt 构建所依据的工作区。
+//   - history: 会话的完整上下文历史，跨多次 Run 持久累积。
+//   - compactor: 会话级自适应压缩器，Token 水位线与校准系数跨 Run 存活。
 type Session struct {
 	mu sync.RWMutex
 
@@ -19,6 +35,13 @@ type Session struct {
 	UpdatedAt time.Time
 
 	history []schema.Message
+
+	compactor *icontext.Compactor
+
+	// running 会话级运行互斥标志。
+	// 同一会话上两次并发 Run 会交错写入历史，破坏消息序列的连续性，
+	// 大模型 API 会直接拒绝这种残缺序列，因此必须拒绝并发运行。
+	running atomic.Bool
 }
 
 func NewSession(id, workspace string) *Session {
@@ -30,8 +53,20 @@ func NewSession(id, workspace string) *Session {
 		CreatedAt: now,
 		UpdatedAt: now,
 
-		history: make([]schema.Message, 0),
+		history:   make([]schema.Message, 0),
+		compactor: icontext.NewCompactor(defaultContextWindow, defaultReserveTokens, defaultRetainLastMsg),
 	}
+}
+
+// TryStartRun 尝试将会话标记为运行中。
+// 返回 false 表示该会话上已有一次 Agent 运行在进行中。
+func (s *Session) TryStartRun() bool {
+	return s.running.CompareAndSwap(false, true)
+}
+
+// EndRun 解除会话的运行状态，允许下一次 Run 接管。
+func (s *Session) EndRun() {
+	s.running.Store(false)
 }
 
 func (s *Session) Append(msgs ...schema.Message) {

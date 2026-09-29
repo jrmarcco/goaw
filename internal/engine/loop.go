@@ -12,30 +12,17 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// AgentEngine 是与工作区无关的 Agent 执行引擎。
+// 单次运行的全部环境 ( 工作区路径 ) 来自 Session，
+// 经由 context 流向 System Prompt 构建与所有工具调用。
 type AgentEngine struct {
-	workspace string // 工作区路径。
-
 	provider provider.LLMProvider
 	registry tools.Registry
-
-	composer *icontext.PromptComposer
 
 	enableThinking bool // 是否启用思考。
 }
 
-const (
-	// defaultContextWindow Compactor 使用的上下文窗口缺省值 ( token )。
-	defaultContextWindow = 128_000
-
-	// defaultReserveTokens 为模型单次补全预留的输出空间 ( token )。
-	defaultReserveTokens = 8_192
-
-	// defaultRetainLastMsg Working Memory 保护区的消息条数。
-	defaultRetainLastMsg = 20
-)
-
 func NewAgentEngine(
-	workspace string,
 	llmProvider provider.LLMProvider,
 	toolRegistry tools.Registry,
 	enableThinking bool,
@@ -44,51 +31,57 @@ func NewAgentEngine(
 		return nil, fmt.Errorf("tool registry is required")
 	}
 
-	skillLoader := icontext.NewSkillLoader(workspace)
-	if err := toolRegistry.Register(tools.NewSkillReader(skillLoader)); err != nil {
+	if err := toolRegistry.Register(tools.NewSkillReader()); err != nil {
 		return nil, fmt.Errorf("failed to register skill reader: %w", err)
 	}
 
 	return &AgentEngine{
-		workspace: workspace,
-
 		provider: llmProvider,
-		registry: toolRegistry,
 
-		composer: icontext.NewPromptComposer(workspace, skillLoader),
+		registry: toolRegistry,
 
 		enableThinking: enableThinking,
 	}, nil
 }
 
-func (e *AgentEngine) Run(ctx context.Context, userPrompt string, reporter Reporter) error {
+// Run 在指定会话上执行一次 Agent 运行。
+// 会话承载运行所需的全部环境与状态: Workspace 决定工具的执行范围和
+// System Prompt 的内容，history 跨 Run 持久累积，同会话的多次运行共享上下文。
+func (e *AgentEngine) Run(ctx context.Context, sess *Session, userPrompt string, reporter Reporter) error {
 	if err := checkCanceled(ctx); err != nil {
 		return err
 	}
+	if sess == nil {
+		return fmt.Errorf("session is required")
+	}
+	if sess.Workspace == "" {
+		return fmt.Errorf("session workspace is required")
+	}
+	if !sess.TryStartRun() {
+		return fmt.Errorf("session %q is busy: another agent run is in progress", sess.ID)
+	}
+	defer sess.EndRun()
 
-	slog.Info("[engine] Agent 引擎启动, 锁定工作区", "workspace", e.workspace)
+	// 工作区经由 context 流向所有工具调用。
+	ctx = tools.WithWorkspace(ctx, sess.Workspace)
+
+	slog.Info("[engine] Agent 引擎启动", "session", sess.ID, "workspace", sess.Workspace)
 	slog.Info("[engine] 慢思考模式", "enabled", e.enableThinking)
 
-	systemMessage, err := e.composer.Build()
+	// System Prompt 每次 Run 现场构建，不写入会话历史，
+	// 确保 AGENTS.md 与技能索引始终反映工作区的最新状态。
+	systemMessage, err := icontext.NewPromptComposer(sess.Workspace).Build()
 	if err != nil {
 		return fmt.Errorf("failed to build system message: %w", err)
 	}
 
-	contextHistory := []schema.Message{
-		systemMessage,
-		{Role: schema.RoleUser, Content: userPrompt},
-	}
-
-	// Compactor 跟踪的是单次会话的 Token 水位线。
-	// 随 Run 独立创建，避免并发的会话互相污染校准状态。
-	compactor := icontext.NewCompactor(defaultContextWindow, defaultReserveTokens, defaultRetainLastMsg)
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: userPrompt})
 
 	for turn := 1; ; turn++ {
-		nextHistory, done, err := e.runTurn(ctx, contextHistory, reporter, turn, compactor)
+		done, err := e.runTurn(ctx, sess, systemMessage, reporter, turn)
 		if err != nil {
 			return err
 		}
-		contextHistory = nextHistory
 		if done {
 			return nil
 		}
@@ -97,48 +90,58 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string, reporter Repor
 
 func (e *AgentEngine) runTurn(
 	ctx context.Context,
-	contextHistory []schema.Message,
+	sess *Session,
+	systemMessage schema.Message,
 	reporter Reporter,
 	turn int,
-	compactor *icontext.Compactor,
-) ([]schema.Message, bool, error) {
+) (bool, error) {
 	if err := checkCanceled(ctx); err != nil {
-		return nil, false, err
+		return false, err
 	}
 	slog.Info("[engine] start turn", "turn", turn)
 
-	// 发送前先压缩: 用真实 Token 水位线决定是否拦截。
-	contextHistory = compactor.Compact(contextHistory)
-
 	if e.enableThinking {
-		thinkGen, err := e.think(ctx, contextHistory, reporter)
+		thinkGen, err := e.think(ctx, e.buildRequestHistory(systemMessage, sess), reporter)
 		if err != nil {
-			return nil, false, err
+			return false, err
 		}
 		// 用真实消耗刷新水位线并校准估算系数。
-		compactor.Observe(thinkGen.Usage.PromptTokens)
+		sess.compactor.Observe(thinkGen.Usage.PromptTokens)
 		if thinkGen.Message.Content != "" {
-			contextHistory = append(contextHistory, thinkGen.Message)
+			sess.Append(thinkGen.Message)
 		}
 	}
 
-	actGen, err := e.act(ctx, contextHistory, reporter)
+	actGen, err := e.act(ctx, e.buildRequestHistory(systemMessage, sess), reporter)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
-	compactor.Observe(actGen.Usage.PromptTokens)
-	contextHistory = append(contextHistory, actGen.Message)
+	sess.compactor.Observe(actGen.Usage.PromptTokens)
+	sess.Append(actGen.Message)
 
 	if len(actGen.Message.ToolCalls) == 0 {
 		slog.Debug("[engine] 模型没有请求工具调用，任务结束。")
-		return contextHistory, true, nil
+		return true, nil
 	}
 
 	observations, err := e.execToolCalls(ctx, actGen.Message.ToolCalls, reporter)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
-	return append(contextHistory, observations...), false, nil
+	sess.Append(observations...)
+	return false, nil
+}
+
+// buildRequestHistory 组装一次模型调用的请求上下文:
+// System Prompt + 会话工作记忆，再经会话级 Compactor 自适应压缩。
+// 工作记忆暂不设条数与 Token 预算，上下文压力统一交给 Compactor
+// 基于真实 Token 水位线处理，避免硬截断丢弃 Compactor 本可仅掩码的内容。
+func (e *AgentEngine) buildRequestHistory(systemMessage schema.Message, sess *Session) []schema.Message {
+	workingMemory := sess.GetWorkingMemory(0, 0)
+	history := make([]schema.Message, 0, len(workingMemory)+1)
+	history = append(history, systemMessage)
+	history = append(history, workingMemory...)
+	return sess.compactor.Compact(history)
 }
 
 // think 模型进行思考。
