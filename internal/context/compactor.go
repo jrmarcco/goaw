@@ -11,16 +11,17 @@ import (
 
 // Compactor 是基于真实 API Token 消耗水位线的自适应上下文压缩器。
 //
-// 传统的固定字符阈值拦截误差极大: 同样的字符数在不同语言、不同模型分词器下
-// 折算出的 Token 可以相差数倍，而且 System Prompt、工具定义 Schema 等隐性
-// 消耗，本地字符统计根本覆盖不到。
+// 传统的固定字符阈值拦截误差极大:
+//
+//	同样的字符数在不同语言、不同模型分词器下折算出的 Token 可以相差数倍，
+//	而且 System Prompt、工具定义 Schema 等隐性消耗，本地字符统计根本覆盖不到。
 //
 // 本实现把度量换成两级结构:
-//   - 水位线: 每次 API 响应回传的 Usage.PromptTokens，是含全部隐性消耗的
-//     真实值，由 Observe 持续刷新;
-//   - 增量估算: 水位线之后新增的消息按校准系数 ( tokens/char ) 折算。
-//     该系数用每次真实消耗做指数加权平均 ( EWMA ) 持续逼近当前模型的
-//     真实分词比率，即"自适应"的核心。
+//   - 水位线:
+//     每次 API 响应回传的 Usage.PromptTokens，是含全部隐性消耗的真实值，由 Observe 持续刷新;
+//   - 增量估算:
+//     水位线之后新增的消息按校准系数 ( tokens/char ) 折算。
+//     该系数用每次真实消耗做指数加权平均 ( EWMA ) 持续逼近当前模型的真实分词比率，即"自适应"的核心。
 //
 // 预估消耗超过 ContextWindow * TriggerRatio - ReserveTokens 即触发压缩。
 type Compactor struct {
@@ -88,8 +89,8 @@ func NewCompactor(contextWindow, reserveTokens, retainLastMsg int) *Compactor {
 	}
 }
 
-// Compact 接收准备发送给大模型的消息数组。
-// 预估 Token 消耗低于水位线时直接放行；超过则执行多轮降级压缩:
+// Compact 接收准备发送给大模型的消息数组并预估 Token 消耗。
+// 低于水位线时直接放行；超过则执行多轮降级压缩:
 //   - System Prompt 直接保留 ( 最高优先级 )。
 //   - 远期历史区: 工具输出全量掩码 ( Masking )、推理过程折叠。
 //   - 短期保护区: 超长消息截断保留头尾 ( Truncation )，预算逐轮收紧。
@@ -143,12 +144,16 @@ func (c *Compactor) Compact(msgs []schema.Message) []schema.Message {
 }
 
 // Observe 消费一次真实 API 响应的 Usage.PromptTokens。
-// 这是整个自适应机制的反馈回路: 刷新水位线，并用
-// ( 真实 token 消耗 / 最近放行的字符量 ) 校准换算系数。
-// 每次模型调用返回后都必须调用。
 //
-// 说明: act 请求的工具定义开销会被一并计入样本，使系数略微偏高，
-// 这符合"宁可高估也不能低估"的原则，EWMA 会自动抹平该系统性偏差。
+// 这是整个自适应机制的反馈回路:
+//
+//	刷新水位线，并用 ( 真实 token 消耗 / 最近放行的字符量 ) 校准换算系数。
+//	每次模型调用返回后都必须调用。
+//
+// 说明:
+//
+//	act 请求的工具定义开销会被一并计入样本，使系数略微偏高，
+//	这符合“宁可高估也不能低估”的原则，EWMA 会自动抹平该系统性偏差。
 func (c *Compactor) Observe(promptTokens int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -175,11 +180,7 @@ func (c *Compactor) Watermark() int {
 
 // triggerThreshold 计算触发压缩的 token 水位线。
 func (c *Compactor) triggerThreshold() int {
-	threshold := int(float64(c.ContextWindow)*c.TriggerRatio) - c.ReserveTokens
-	if threshold < 1 {
-		threshold = 1
-	}
-	return threshold
+	return max(int(float64(c.ContextWindow)*c.TriggerRatio)-c.ReserveTokens, 1)
 }
 
 // projectTokensLocked 估算当前这组消息发送出去会消耗多少 Prompt Token。
