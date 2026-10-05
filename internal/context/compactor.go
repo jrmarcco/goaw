@@ -9,6 +9,30 @@ import (
 	"github.com/jrmarcco/goaw/internal/schema"
 )
 
+const (
+	// defaultTokensPerChar 初始校准系数。
+	// 首轮请求尚无真实反馈时的保守估计 ( 中英混排场景 )，第一次 Observe 之后即被真实数据修正。
+	defaultTokensPerChar = 0.5
+
+	// ewmaAlpha 校准平滑系数。
+	// 偏向近期样本，同时滤掉 think / act 两次调用间工具定义开销带来的抖动。
+	ewmaAlpha = 0.3
+
+	// maxCompactRounds 单次 Compact 的最大压缩轮数。
+	// 每轮之后若仍超水位，收紧保护区截断预算再来一轮，直到达标或轮数耗尽。
+	maxCompactRounds = 4
+
+	// farHistoryMaskChars 远期历史单条消息超过该字符数才值得掩码。
+	farHistoryMaskChars = 200
+
+	// defaultTriggerRatio 缺省触发水位线比例 ( 0, 1 )。
+	defaultTriggerRatio = 0.8
+
+	// minTruncateKeep 保护区单条消息截断预算的收紧下限 ( 字符 )。
+	// 再减半已省不出多少空间，宁可保住头尾上下文的可读性。
+	minTruncateKeep = 250
+)
+
 // Compactor 是基于真实 API Token 消耗水位线的自适应上下文压缩器。
 //
 // 传统的固定字符阈值拦截误差极大:
@@ -37,7 +61,7 @@ type Compactor struct {
 	// 与请求参数的 max_tokens 对齐，防止"输入 + 输出"合起来撑爆窗口。
 	ReserveTokens int
 
-	// RetainLastMsg Working Memory 保护区 ( 最近的 n 条消息 )。
+	// RetainLastMsg 是 Working Memory 保护区 ( 最近的 n 条消息 )。
 	// 保护区内的消息不做 Masking，只做局部截断。
 	RetainLastMsg int
 
@@ -53,30 +77,6 @@ type Compactor struct {
 	// tokensPerChar 校准系数: 每字符折算的真实 token 数。
 	tokensPerChar float64
 }
-
-const (
-	// defaultTokensPerChar 初始校准系数。
-	// 首轮请求尚无真实反馈时的保守估计 ( 中英混排场景 )，第一次 Observe 之后即被真实数据修正。
-	defaultTokensPerChar = 0.5
-
-	// ewmaAlpha 校准平滑系数。
-	// 偏向近期样本，同时滤掉 think / act 两次调用间工具定义开销带来的抖动。
-	ewmaAlpha = 0.3
-
-	// maxCompactRounds 单次 Compact 的最大压缩轮数。
-	// 每轮之后若仍超水位，收紧保护区截断预算再来一轮，直到达标或轮数耗尽。
-	maxCompactRounds = 4
-
-	// farHistoryMaskChars 远期历史单条消息超过该字符数才值得掩码。
-	farHistoryMaskChars = 200
-
-	// defaultTriggerRatio 缺省触发水位线比例 ( 0, 1 )。
-	defaultTriggerRatio = 0.8
-
-	// minTruncateKeep 保护区单条消息截断预算的收紧下限 ( 字符 )。
-	// 再减半已省不出多少空间，宁可保住头尾上下文的可读性。
-	minTruncateKeep = 250
-)
 
 // NewCompactor 创建自适应压缩器。
 func NewCompactor(contextWindow, reserveTokens, retainLastMsg int) *Compactor {
@@ -205,10 +205,7 @@ func (c *Compactor) degrade(msgs []schema.Message, maxKeep int) []schema.Message
 	compacted := make([]schema.Message, 0, len(msgs))
 
 	msgCnt := len(msgs)
-	protectStartIdx := msgCnt - c.RetainLastMsg
-	if protectStartIdx < 0 {
-		protectStartIdx = 0
-	}
+	protectStartIdx := max(msgCnt-c.RetainLastMsg, 0)
 
 	for i, msg := range msgs {
 		// System Prompt 直接保留 ( 最高优先级 )。
