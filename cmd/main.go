@@ -43,7 +43,7 @@ func main() {
 	// TODO: 测试用
 	workspace = filepath.Join(workspace, "tmp")
 
-	llmProvider, err := provider.NewAnthropicProvider("glm-5.3-flash")
+	llmProvider, err := provider.NewAnthropicProvider("glm-5.3")
 	if err != nil {
 		log.Fatalf("创建模型提供者失败: %v", err)
 	}
