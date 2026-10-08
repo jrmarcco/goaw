@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	icontext "github.com/jrmarcco/goaw/internal/context"
 	"github.com/jrmarcco/goaw/internal/provider"
@@ -97,6 +98,7 @@ func (e *AgentEngine) runTurn(
 	}
 	slog.Info("[engine] start turn", "turn", turn)
 
+	var currThinkingContent string
 	if e.enableThinking {
 		thinkGen, err := e.think(ctx, e.buildRequestHistory(systemMessage, sess), reporter)
 		if err != nil {
@@ -105,7 +107,7 @@ func (e *AgentEngine) runTurn(
 		// 用真实消耗刷新水位线并校准估算系数。
 		sess.compactor.Observe(thinkGen.Usage.PromptTokens)
 		if thinkGen.Message.Content != "" {
-			sess.Append(thinkGen.Message)
+			currThinkingContent = thinkGen.Message.Content
 		}
 	}
 
@@ -114,7 +116,14 @@ func (e *AgentEngine) runTurn(
 		return false, err
 	}
 	sess.compactor.Observe(actGen.Usage.PromptTokens)
-	sess.Append(actGen.Message)
+
+	// 合并为单条 Assistant Message。
+	finalAssistantMsg := schema.Message{
+		Role:      schema.RoleAssistant,
+		Content:   strings.TrimSpace(currThinkingContent + "\n" + actGen.Message.Content),
+		ToolCalls: actGen.Message.ToolCalls,
+	}
+	sess.Append(finalAssistantMsg)
 
 	if len(actGen.Message.ToolCalls) == 0 {
 		slog.Debug("[engine] 模型没有请求工具调用，任务结束。")
