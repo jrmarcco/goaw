@@ -56,11 +56,11 @@ func (w *FileWriter) Execute(ctx context.Context, args json.RawMessage) (string,
 
 	var input fileWriteArgs
 	if err = json.Unmarshal(args, &input); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
+		return "", newToolError(schema.ErrCodeInvalidArgs, err, "解析参数失败")
 	}
 
 	if !filepath.IsLocal(input.Path) {
-		return "", fmt.Errorf("文件路径必须是工作区内的相对路径: %q", input.Path)
+		return "", newToolError(schema.ErrCodePathEscape, nil, "文件路径必须是工作区内的相对路径: %q", input.Path)
 	}
 
 	// 拼接完整路径 ( 限制在 workspace 下执行，防止模型修改系统级文件 )。
@@ -68,13 +68,13 @@ func (w *FileWriter) Execute(ctx context.Context, args json.RawMessage) (string,
 
 	// 自动创建缺失的父目录。
 	if err = os.MkdirAll(filepath.Dir(fullpath), dirPerm); err != nil {
-		return "", fmt.Errorf("创建父目录失败: %w", err)
+		return "", wrapSysError("创建父目录失败", err)
 	}
 
 	// 写入文件内容。
 	err = os.WriteFile(fullpath, []byte(input.Content), filePerm)
 	if err != nil {
-		return "", fmt.Errorf("写入文件失败: %w", err)
+		return "", wrapSysError("写入文件失败", err)
 	}
 
 	return fmt.Sprintf("成功写入内容到文件: %s", input.Path), nil

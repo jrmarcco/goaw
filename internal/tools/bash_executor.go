@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/jrmarcco/goaw/internal/schema"
@@ -85,17 +87,31 @@ func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (strin
 	// 执行并捕获 CombinedOutput ( stdout + stderr )。
 	out, err := cmd.CombinedOutput()
 
-	if timeoutCtx.Err() != nil {
-		// 命令执行超时，返回告警给模型。
-		return fmt.Sprintf("%s\n[Warning: 命令执行超时(%s)，已强制终止。]", out, e.timeout), nil
+	// 超时判定用哨兵错误而非文案，父上下文取消等其他原因按普通错误上抛。
+	if ctxErr := timeoutCtx.Err(); ctxErr != nil {
+		if errors.Is(ctxErr, context.DeadlineExceeded) {
+			// 超时属于软失败：告警输出回传模型自纠，错误码供恢复层注入提示。
+			return "", &ToolError{
+				Code: schema.ErrCodeCmdTimeout,
+				Msg:  fmt.Sprintf("%s\n[Warning: 命令执行超时(%s)，已强制终止。]", out, e.timeout),
+				Soft: true,
+			}
+		}
+		return "", ctxErr
 	}
 
 	// 错误回传 ( Self-Correction 自愈机制 )。
 	// 注意:
 	//  当 bash 报错时绝对不能反悔 Go 的 error 阻断程序。
 	//  必须把 err 和 output 一起返回给模型，让模型的自纠能力分析报错。
+	//  因此命令失败统一标记为软失败 ( Soft )：Registry 不置 IsError，输出照常回传，
+	//  仅通过错误码 ( 见 classifyCmdFailure ) 向恢复层提供精准的分类信号。
 	if err != nil {
-		return fmt.Sprintf("命令执行失败: %v\n输出: \n%s", err, out), nil
+		return "", &ToolError{
+			Code: classifyCmdFailure(err, string(out)),
+			Msg:  fmt.Sprintf("命令执行失败: %v\n输出: \n%s", err, out),
+			Soft: true,
+		}
 	}
 
 	if len(out) == 0 {
@@ -107,6 +123,30 @@ func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (strin
 		return fmt.Sprintf("%s\n\n...[终端输出过长，已截断至前 %d 字节]", out[:maxLen], maxLen), nil
 	}
 	return string(out), nil
+}
+
+// bash 退出码契约 ( 与错误码分类的映射见 classifyCmdFailure )。
+const (
+	bashExitSyntaxError = 2   // 语法错误等 bash 内置错误 ( 语义宽泛，需结合 stderr 确认 )
+	bashExitCmdNotFound = 127 // command not found
+)
+
+// classifyCmdFailure 对 bash 命令失败进行精准分类。
+// 退出码 127 ( command not found ) 是 bash 的稳定契约信号；
+// syntax error 只能依赖 stderr 文案匹配 ( 退出码 2 语义过于宽泛，无法区分 )，
+// 这是错误分类链路中唯一保留的 best-effort 文本匹配，且匹配的是 shell 的固定输出。
+func classifyCmdFailure(err error, combinedOut string) schema.ToolErrorCode {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+		switch exitErr.ExitCode() {
+		case bashExitCmdNotFound:
+			return schema.ErrCodeCmdNotFound
+		case bashExitSyntaxError:
+			if strings.Contains(strings.ToLower(combinedOut), "syntax error") {
+				return schema.ErrCodeCmdSyntaxError
+			}
+		}
+	}
+	return schema.ErrCodeCmdFailed
 }
 
 type bashArgs struct {

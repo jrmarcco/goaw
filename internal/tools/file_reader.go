@@ -52,16 +52,16 @@ func (r *FileReader) Execute(ctx context.Context, args json.RawMessage) (string,
 
 	var input fileReadArgs
 	if err = json.Unmarshal(args, &input); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
+		return "", newToolError(schema.ErrCodeInvalidArgs, err, "解析参数失败")
 	}
 
 	if !filepath.IsLocal(input.Path) {
-		return "", fmt.Errorf("文件路径必须是工作区内的相对路径: %q", input.Path)
+		return "", newToolError(schema.ErrCodePathEscape, nil, "文件路径必须是工作区内的相对路径: %q", input.Path)
 	}
 
 	root, err := os.OpenRoot(workspace)
 	if err != nil {
-		return "", fmt.Errorf("打开工作区失败: %w", err)
+		return "", wrapSysError("打开工作区失败", err)
 	}
 	defer func() {
 		_ = root.Close()
@@ -69,7 +69,7 @@ func (r *FileReader) Execute(ctx context.Context, args json.RawMessage) (string,
 
 	file, err := root.Open(input.Path)
 	if err != nil {
-		return "", fmt.Errorf("打开文件失败: %w", err)
+		return "", wrapSysError("打开文件失败", err)
 	}
 	defer func() {
 		_ = file.Close()
@@ -77,7 +77,7 @@ func (r *FileReader) Execute(ctx context.Context, args json.RawMessage) (string,
 
 	content, err := io.ReadAll(file)
 	if err != nil {
-		return "", fmt.Errorf("读取文件内容失败: %w", err)
+		return "", wrapSysError("读取文件内容失败", err)
 	}
 
 	const MaxLen = 8192

@@ -2,7 +2,8 @@ package tools
 
 import (
 	"context"
-	"fmt"
+
+	"github.com/jrmarcco/goaw/internal/schema"
 )
 
 // workspaceCtxKey 工作区在 context 中的键类型。
@@ -21,7 +22,7 @@ func WithWorkspace(ctx context.Context, workspace string) context.Context {
 func WorkspaceFromContext(ctx context.Context) (string, error) {
 	workspace, _ := ctx.Value(workspaceCtxKey{}).(string)
 	if workspace == "" {
-		return "", fmt.Errorf("执行上下文中缺少工作区")
+		return "", newToolError(schema.ErrCodeNoWorkspace, nil, "执行上下文中缺少工作区")
 	}
 	return workspace, nil
 }

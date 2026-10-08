@@ -20,13 +20,15 @@ type AgentEngine struct {
 	provider provider.LLMProvider
 	registry tools.Registry
 
-	enableThinking bool // 是否启用思考。
+	thinkMode bool
+
+	recovery *icontext.RecoveryManager
 }
 
 func NewAgentEngine(
 	llmProvider provider.LLMProvider,
 	toolRegistry tools.Registry,
-	enableThinking bool,
+	thinkMode bool,
 ) (*AgentEngine, error) {
 	if toolRegistry == nil {
 		return nil, fmt.Errorf("tool registry is required")
@@ -40,7 +42,9 @@ func NewAgentEngine(
 		provider: llmProvider,
 		registry: toolRegistry,
 
-		enableThinking: enableThinking,
+		thinkMode: thinkMode,
+
+		recovery: icontext.NewRecoveryManager(),
 	}, nil
 }
 
@@ -66,7 +70,7 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter)
 	ctx = tools.WithWorkspace(ctx, sess.Workspace)
 
 	slog.Info("[engine] Agent 引擎启动", "session", sess.ID, "workspace", sess.Workspace)
-	slog.Info("[engine] 慢思考模式", "enabled", e.enableThinking)
+	slog.Info("[engine] 慢思考模式", "enabled", e.thinkMode)
 
 	// System Prompt 每次 Run 现场构建，不写入会话历史，
 	// 确保 AGENTS.md 与技能索引始终反映工作区的最新状态。
@@ -99,7 +103,7 @@ func (e *AgentEngine) runTurn(
 	slog.Info("[engine] start turn", "turn", turn)
 
 	var currThinkingContent string
-	if e.enableThinking {
+	if e.thinkMode {
 		thinkGen, err := e.think(ctx, e.buildRequestHistory(systemMessage, sess), reporter)
 		if err != nil {
 			return false, err
@@ -239,7 +243,7 @@ func (e *AgentEngine) execToolCall(
 	ctx context.Context,
 	toolCall schema.ToolCall,
 	reporter Reporter,
-	index int,
+	gidx int,
 ) (schema.Message, error) {
 	if err := checkCanceled(ctx); err != nil {
 		return schema.Message{}, err
@@ -247,7 +251,7 @@ func (e *AgentEngine) execToolCall(
 
 	slog.Info(
 		"[engine] -> 并发执行工具调用",
-		"goroutine_index", index,
+		"goroutine_index", gidx,
 		"tool_name", toolCall.Name,
 		"args", string(toolCall.Args),
 	)
@@ -262,8 +266,32 @@ func (e *AgentEngine) execToolCall(
 	if err := checkCanceled(ctx); err != nil {
 		return schema.Message{}, err
 	}
+
+	finalOutput := result.Output
+	if result.IsError {
+		// 发生错误时，按领域错误码注入救援指南。
+		finalOutput = e.recovery.AnalyzeAndInject(toolCall.Name, result.ErrorCode, result.Output)
+		slog.Error(
+			"[engine] -> 工具调用失败，注入救援指南。",
+			"goroutine_index", gidx,
+			"tool_name", toolCall.Name,
+			"error_code", result.ErrorCode,
+			"recovery_hint", finalOutput,
+		)
+	} else if result.ErrorCode != "" {
+		// 软失败 ( 如 bash 命令失败 )：输出照常回传模型自纠，仅按错误码注入救援指南。
+		finalOutput = e.recovery.AnalyzeAndInject(toolCall.Name, result.ErrorCode, result.Output)
+		slog.Warn(
+			"[engine] -> 工具软失败，注入救援指南。",
+			"goroutine_index", gidx,
+			"tool_name", toolCall.Name,
+			"error_code", result.ErrorCode,
+			"recovery_hint", finalOutput,
+		)
+	}
+
 	if reporter != nil {
-		_ = reporter.OnToolCallResult(ctx, toolCall.Name, result.Output, result.IsError)
+		_ = reporter.OnToolCallResult(ctx, toolCall.Name, finalOutput, result.IsError)
 	}
 	if err := checkCanceled(ctx); err != nil {
 		return schema.Message{}, err
@@ -271,7 +299,7 @@ func (e *AgentEngine) execToolCall(
 
 	return schema.Message{
 		Role:       schema.RoleUser,
-		Content:    result.Output,
+		Content:    finalOutput,
 		ToolCallID: toolCall.ID,
 	}, nil
 }

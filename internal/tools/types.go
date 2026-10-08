@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -111,19 +112,45 @@ func (r *DefaultRegistry) Execute(ctx context.Context, call schema.ToolCall) sch
 		// 找不到工具。
 		// 这是因为模型产生了幻觉，直接跑出错误。
 		return schema.ToolCallResult{
-			ID:      call.ID,
-			Output:  fmt.Sprintf("工具 %s 未注册", call.Name),
-			IsError: true,
+			ID:        call.ID,
+			Output:    fmt.Sprintf("工具 %s 未注册", call.Name),
+			IsError:   true,
+			ErrorCode: schema.ErrCodeToolNotFound,
 		}
 	}
 
 	// 执行工具。
 	output, err := tool.Execute(ctx, call.Args)
 	if err != nil {
+		// 从错误链中提取领域错误码 ( 见 ToolError )，随结果结构化传输，
+		// 下游恢复层按码查表，不再对文案做字符串匹配。
+		var toolErr *ToolError
+		if errors.As(err, &toolErr) {
+			// 软失败 ( Self-Correction 自愈机制 )：
+			// 输出照常回传给模型自纠，不标记 IsError，仅随结果传输错误码。
+			if toolErr.Soft {
+				return schema.ToolCallResult{
+					ID:        call.ID,
+					Output:    toolErr.Msg,
+					IsError:   false,
+					ErrorCode: toolErr.Code,
+				}
+			}
+			// 硬错误：ToolError.Error() 会把错误码 token 渲染进文案，模型可直接看到。
+			return schema.ToolCallResult{
+				ID:        call.ID,
+				Output:    fmt.Sprintf("工具 %s 执行失败: %v", call.Name, err),
+				IsError:   true,
+				ErrorCode: toolErr.Code,
+			}
+		}
+
+		// 未分类的外来 error。
 		return schema.ToolCallResult{
-			ID:      call.ID,
-			Output:  fmt.Sprintf("工具 %s 执行失败: %v", call.Name, err),
-			IsError: true,
+			ID:        call.ID,
+			Output:    fmt.Sprintf("工具 %s 执行失败: %v", call.Name, err),
+			IsError:   true,
+			ErrorCode: schema.ErrCodeUnknown,
 		}
 	}
 

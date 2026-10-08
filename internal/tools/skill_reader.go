@@ -50,7 +50,7 @@ func (r *SkillReader) Execute(ctx context.Context, args json.RawMessage) (string
 
 	var input skillReadArgs
 	if err = json.Unmarshal(args, &input); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
+		return "", newToolError(schema.ErrCodeInvalidArgs, err, "解析参数失败")
 	}
 
 	// 技能目录由工作区决定，随调用解析。

@@ -39,6 +39,11 @@ type ToolCallResult struct {
 	ID      string `json:"id"`
 	Output  string `json:"output"`
 	IsError bool   `json:"isError,omitempty"`
+
+	// ErrorCode 是随结果传输的领域错误码 ( 见 ToolErrorCode )。
+	// 空值表示无错误；软失败 ( 如 bash 命令失败 ) 时 IsError 为 false 但 ErrorCode 非空，
+	// 输出照常回传给模型自纠，恢复层仅依据错误码决定是否注入提示。
+	ErrorCode ToolErrorCode `json:"errorCode,omitempty"`
 }
 
 // Usage 是一次模型调用的真实资源消耗。

@@ -63,16 +63,16 @@ func (e *FileEditor) Execute(ctx context.Context, args json.RawMessage) (string,
 
 	var input fileEditArgs
 	if err = json.Unmarshal(args, &input); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
+		return "", newToolError(schema.ErrCodeInvalidArgs, err, "解析参数失败")
 	}
 
 	if !filepath.IsLocal(input.Path) {
-		return "", fmt.Errorf("文件路径必须是工作区内的相对路径: %q", input.Path)
+		return "", newToolError(schema.ErrCodePathEscape, nil, "文件路径必须是工作区内的相对路径: %q", input.Path)
 	}
 
 	root, err := os.OpenRoot(workspace)
 	if err != nil {
-		return "", fmt.Errorf("打开工作区失败: %w", err)
+		return "", wrapSysError("打开工作区失败", err)
 	}
 	defer func() {
 		_ = root.Close()
@@ -80,7 +80,7 @@ func (e *FileEditor) Execute(ctx context.Context, args json.RawMessage) (string,
 
 	file, err := root.Open(input.Path)
 	if err != nil {
-		return "", fmt.Errorf("打开文件失败: %w", err)
+		return "", wrapSysError("打开文件失败", err)
 	}
 	defer func() {
 		_ = file.Close()
@@ -89,7 +89,7 @@ func (e *FileEditor) Execute(ctx context.Context, args json.RawMessage) (string,
 	// 读取文件内容。
 	contentBytes, err := io.ReadAll(file)
 	if err != nil {
-		return "", fmt.Errorf("读取文件内容失败: %w", err)
+		return "", wrapSysError("读取文件内容失败", err)
 	}
 	oriContent := string(contentBytes)
 
@@ -101,7 +101,7 @@ func (e *FileEditor) Execute(ctx context.Context, args json.RawMessage) (string,
 
 	// 写入新内容。
 	if err := os.WriteFile(filepath.Join(workspace, input.Path), []byte(newContent), filePerm); err != nil {
-		return "", fmt.Errorf("写入文件失败: %w", err)
+		return "", wrapSysError("写入文件失败", err)
 	}
 
 	return fmt.Sprintf("✅ 成功修改文件: %s", input.Path), nil
@@ -121,7 +121,7 @@ func (e *FileEditor) fuzzyReplace(oriContent, oldContent, newContent string) (st
 		return strings.Replace(oriContent, oldContent, newContent, 1), nil
 	}
 	if cnt > 1 {
-		return "", fmt.Errorf("oldContent 在原始文件中出现了 %d 次，无法确定唯一匹配", cnt)
+		return "", newToolError(schema.ErrCodeEditAmbiguous, nil, "oldContent 在原始文件中出现了 %d 次，无法确定唯一匹配", cnt)
 	}
 
 	// L2: 统一换行符 ( \r\n 转为 \n )。
@@ -155,7 +155,7 @@ func (e *FileEditor) lineByLineReplace(content, oldContent, newContent string) (
 	oldlines := strings.Split(strings.TrimSpace(oldContent), "\n")
 
 	if len(oldlines) == 0 || len(contentlines) < len(oldlines) {
-		return "", fmt.Errorf("未找到匹配 oldContent 的文本内容")
+		return "", newToolError(schema.ErrCodeEditNoMatch, nil, "未找到匹配 oldContent 的文本内容")
 	}
 
 	// 清理 oldContent 每行首位空白。
@@ -186,11 +186,11 @@ func (e *FileEditor) lineByLineReplace(content, oldContent, newContent string) (
 	}
 
 	if matchedCnt == 0 {
-		return "", fmt.Errorf("未找到匹配 oldContent 的文本内容，请仔细确认文件内容和缩进")
+		return "", newToolError(schema.ErrCodeEditNoMatch, nil, "未找到匹配 oldContent 的文本内容，请仔细确认文件内容和缩进")
 	}
 
 	if matchedCnt > 1 {
-		return "", fmt.Errorf("找到 %d 个匹配 oldContent 的文本内容，请提供更明确的上下文", matchedCnt)
+		return "", newToolError(schema.ErrCodeEditAmbiguous, nil, "找到 %d 个匹配 oldContent 的文本内容，请提供更明确的上下文", matchedCnt)
 	}
 
 	// 执行替换。
