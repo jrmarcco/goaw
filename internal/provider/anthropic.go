@@ -125,10 +125,9 @@ func (p *AnthropicProvider) transContextMessage(msgs []schema.Message) (string, 
 
 		case schema.RoleAssistant:
 			var blocks []anthropic.ContentBlockParamUnion
-			if msg.Content != "" {
-				blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
-			}
-
+			// 即使 Content 为空字符串，
+			// 也要填充一个空的 TextBlock 防止引发 1214 错误。
+			blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
 			for _, tc := range msg.ToolCalls {
 				var inputMap map[string]any
 				_ = json.Unmarshal(tc.Args, &inputMap)

@@ -105,12 +105,11 @@ func (p *OpenAIProvider) transContextMessage(msgs []schema.Message) []openai.Cha
 			}
 
 		case schema.RoleAssistant:
-			astParam := openai.ChatCompletionAssistantMessageParam{}
-
-			if msg.Content != "" {
-				astParam.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
+			astParam := openai.ChatCompletionAssistantMessageParam{
+				// 即使 Content 为空字符串也要发送以防止引发 1214 错误。
+				Content: openai.ChatCompletionAssistantMessageParamContentUnion{
 					OfString: openai.String(msg.Content),
-				}
+				},
 			}
 
 			// 如果历史包含 ToolCalls 必须原样放回，以维系模型的逻辑链
