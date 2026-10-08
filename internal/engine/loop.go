@@ -46,7 +46,7 @@ func NewAgentEngine(
 // Run 在指定会话上执行一次 Agent 运行。
 // 会话承载运行所需的全部环境与状态: Workspace 决定工具的执行范围和
 // System Prompt 的内容，history 跨 Run 持久累积，同会话的多次运行共享上下文。
-func (e *AgentEngine) Run(ctx context.Context, sess *Session, userPrompt string, reporter Reporter) error {
+func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter) error {
 	if err := checkCanceled(ctx); err != nil {
 		return err
 	}
@@ -69,12 +69,10 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, userPrompt string,
 
 	// System Prompt 每次 Run 现场构建，不写入会话历史，
 	// 确保 AGENTS.md 与技能索引始终反映工作区的最新状态。
-	systemMessage, err := icontext.NewPromptComposer(sess.Workspace).Build()
+	systemMessage, err := icontext.NewPromptComposer(sess.Workspace, sess.PlanMode).Build()
 	if err != nil {
 		return fmt.Errorf("failed to build system message: %w", err)
 	}
-
-	sess.Append(schema.Message{Role: schema.RoleUser, Content: userPrompt})
 
 	for turn := 1; ; turn++ {
 		done, err := e.runTurn(ctx, sess, systemMessage, reporter, turn)

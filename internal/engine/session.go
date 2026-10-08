@@ -23,6 +23,7 @@ const (
 // Session 代表一次人机交互过程。
 // 是 Agent 运行所需环境与状态的唯一载体:
 //   - Workspace: 工具执行范围与 System Prompt 构建所依据的工作区。
+//   - PlanMode: 会话运行模式，决定 System Prompt 是否注入长程任务规范。
 //   - history: 会话的完整上下文历史，跨多次 Run 持久累积。
 //   - compactor: 会话级自适应压缩器，Token 水位线与校准系数跨 Run 存活。
 type Session struct {
@@ -30,6 +31,7 @@ type Session struct {
 
 	ID        string
 	Workspace string
+	PlanMode  bool
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -44,11 +46,12 @@ type Session struct {
 	running atomic.Bool
 }
 
-func NewSession(id, workspace string) *Session {
+func NewSession(id, workspace string, planMode bool) *Session {
 	now := time.Now()
 	return &Session{
 		ID:        id,
 		Workspace: workspace,
+		PlanMode:  planMode,
 
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -127,20 +130,32 @@ func isPlainUserMessage(msg schema.Message) bool {
 	return msg.Role == schema.RoleUser && msg.ToolCallID == ""
 }
 
+// SessionManager 进程级会话注册表。
+// 保证会话标识到 Session 实例的唯一映射:
+//
+//	同一 ID 在任意入口 ( 飞书机器人、终端 ) 都命中同一个会话，跨入口共享上下文。
+//
+// 由组合根 ( main ) 创建并注入各入口，不归任何单一入口私有;
+// 当前为纯内存实现，会话只增不减，淘汰与持久化待 SessionStorage 落地。
 type SessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 }
 
+// NewSessionManager 创建一个空的会话管理器。
 func NewSessionManager() *SessionManager {
 	return &SessionManager{
 		sessions: make(map[string]*Session),
 	}
 }
 
-// Get 获取一个会话。
-// 如果会话不存在，则创建一个新的会话。
-func (m *SessionManager) Get(id, workspace string) *Session {
+// Get 获取一个会话 ( get-or-create )。
+// 如果会话不存在，则按给定环境创建一个新的会话。
+//
+// workspace 与 planMode 仅在首次创建时生效:
+// 会话已存在时直接返回既有实例，本次传入的环境参数被静默忽略，
+// 会话环境以第一次调用为准。
+func (m *SessionManager) Get(id, workspace string, planMode bool) *Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -148,7 +163,7 @@ func (m *SessionManager) Get(id, workspace string) *Session {
 		return sess
 	}
 
-	sess := NewSession(id, workspace)
+	sess := NewSession(id, workspace, planMode)
 	m.sessions[id] = sess
 	return sess
 }

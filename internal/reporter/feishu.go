@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jrmarcco/goaw/internal/engine"
+	"github.com/jrmarcco/goaw/internal/schema"
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
@@ -22,17 +23,33 @@ type FeishuBot struct {
 	appSecret string
 	workspace string
 
+	// planMode 飞书会话的创建模式，当前固定为 Plan 模式。
+	planMode bool
+
 	agentRunTimeout    time.Duration
 	messageSendTimeout time.Duration
 
-	client   *lark.Client
-	engine   *engine.AgentEngine
+	client *lark.Client
+	engine *engine.AgentEngine
+
+	// sessions 组合根注入的会话管理器，进程内所有入口共享，
+	// 飞书 chatID 与 Agent 会话一一对应。
 	sessions *engine.SessionManager
 }
 
-func NewFeishuBot(appID, appSecret, workspace string, eng *engine.AgentEngine) (*FeishuBot, error) {
+// NewFeishuBot 创建飞书机器人。
+// eng 与 sessions 均由调用方 ( 组合根 ) 注入:
+// 会话是进程级领域状态，不归机器人私有，多入口共享同一管理器，
+// 保证同一 chatID 在任何入口都命中同一个会话。
+func NewFeishuBot(appID, appSecret, workspace string, eng *engine.AgentEngine, sessions *engine.SessionManager) (*FeishuBot, error) {
 	if appID == "" || appSecret == "" {
 		return nil, fmt.Errorf("appID or appSecret is empty")
+	}
+	if eng == nil {
+		return nil, fmt.Errorf("agent engine is required")
+	}
+	if sessions == nil {
+		return nil, fmt.Errorf("session manager is required")
 	}
 
 	const defaultAgentRunTimeout = 10 * time.Minute
@@ -43,12 +60,13 @@ func NewFeishuBot(appID, appSecret, workspace string, eng *engine.AgentEngine) (
 		appSecret: appSecret,
 		workspace: workspace,
 
+		planMode:           true,
 		agentRunTimeout:    defaultAgentRunTimeout,
 		messageSendTimeout: defaultMessageSendTimeout,
 
 		client:   lark.NewClient(appID, appSecret),
 		engine:   eng,
-		sessions: engine.NewSessionManager(),
+		sessions: sessions,
 	}, nil
 }
 
@@ -106,12 +124,16 @@ func (b *FeishuBot) handleAgentRun(ctx context.Context, chatID, prompt string) {
 	reporter := NewFeishuReporter(b.client, chatID)
 
 	// 飞书会话 ( chatID ) 与 Agent 会话一一对应，跨消息累积上下文。
-	sess := b.sessions.Get(chatID, b.workspace)
+	sess := b.sessions.Get(chatID, b.workspace, b.planMode)
+	sess.Append(schema.Message{
+		Role:    schema.RoleUser,
+		Content: prompt,
+	})
 
 	agentRunCtx, agentRunCancel := context.WithTimeout(ctx, b.agentRunTimeout)
 	defer agentRunCancel()
 
-	if err := b.engine.Run(agentRunCtx, sess, prompt, reporter); err != nil {
+	if err := b.engine.Run(agentRunCtx, sess, reporter); err != nil {
 		notifyCtx, notifyCancel := context.WithTimeout(ctx, b.messageSendTimeout)
 		defer notifyCancel()
 

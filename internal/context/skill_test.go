@@ -62,7 +62,7 @@ func TestPromptComposerOnlyIncludesSkillIndex(t *testing.T) {
 	`
 	writeTestSkill(t, workspace, "deploy", content)
 
-	message, err := NewPromptComposer(workspace).Build()
+	message, err := NewPromptComposer(workspace, false).Build()
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}

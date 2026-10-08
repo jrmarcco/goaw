@@ -15,7 +15,7 @@ const testToolCallID2 = "tc-2"
 func TestSessionRunGuard(t *testing.T) {
 	t.Parallel()
 
-	s := NewSession("s", "w")
+	s := NewSession("s", "w", false)
 
 	if s.compactor == nil {
 		t.Fatal("NewSession() did not initialize the compactor")
@@ -55,7 +55,7 @@ func TestGetWorkingMemory(t *testing.T) {
 	t.Run("no limit returns all messages", func(t *testing.T) {
 		t.Parallel()
 
-		s := NewSession("s", "w")
+		s := NewSession("s", "w", false)
 		s.Append(msgs...)
 
 		if got := s.GetWorkingMemory(0); len(got) != len(msgs) {
@@ -66,7 +66,7 @@ func TestGetWorkingMemory(t *testing.T) {
 	t.Run("limit larger than history returns all messages", func(t *testing.T) {
 		t.Parallel()
 
-		s := NewSession("s", "w")
+		s := NewSession("s", "w", false)
 		s.Append(msgs...)
 
 		if got := s.GetWorkingMemory(len(msgs) + 1); len(got) != len(msgs) {
@@ -77,7 +77,7 @@ func TestGetWorkingMemory(t *testing.T) {
 	t.Run("message count limit", func(t *testing.T) {
 		t.Parallel()
 
-		s := NewSession("s", "w")
+		s := NewSession("s", "w", false)
 		s.Append(msgs...)
 
 		// limit=3 的截取点恰好落在 User 消息上，无需回退，严格返回 3 条。
@@ -93,7 +93,7 @@ func TestGetWorkingMemory(t *testing.T) {
 	t.Run("repairs orphaned tool call results by widening the window", func(t *testing.T) {
 		t.Parallel()
 
-		s := NewSession("s", "w")
+		s := NewSession("s", "w", false)
 		s.Append(
 			user("early"),
 			asst("call a tool"),
@@ -118,7 +118,7 @@ func TestGetWorkingMemory(t *testing.T) {
 	t.Run("repairs leading assistant head", func(t *testing.T) {
 		t.Parallel()
 
-		s := NewSession("s", "w")
+		s := NewSession("s", "w", false)
 		s.Append(
 			user("early"),
 			asst("reply"),
@@ -149,7 +149,7 @@ func TestGetWorkingMemory(t *testing.T) {
 	t.Run("all tool result window never returns empty", func(t *testing.T) {
 		t.Parallel()
 
-		s := NewSession("s", "w")
+		s := NewSession("s", "w", false)
 		s.Append(
 			user("early"),
 			schema.Message{
