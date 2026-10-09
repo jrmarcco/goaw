@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/jrmarcco/goaw/internal/schema"
+	xoption "github.com/jrmarcco/jit/xbean/option"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
@@ -20,23 +20,27 @@ type OpenAIProvider struct {
 	client openai.Client
 }
 
-func NewOpenAIV3Provider(model string) (*OpenAIProvider, error) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
+func NewOpenAIV3Provider(apiKey, model string, opts ...Opt) (*OpenAIProvider, error) {
 	if apiKey == "" {
-		return nil, errors.New("OPENAI_API_KEY is not set")
+		return nil, errors.New("openai: api key is empty")
 	}
 
-	baseURL := os.Getenv("OPENAI_BASE_URL")
-	if baseURL != "" {
-		return &OpenAIProvider{
-			model:  model,
-			client: openai.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL)),
-		}, nil
+	if model == "" {
+		return nil, errors.New("openai: model is empty")
+	}
+
+	// SDK 自带 option 包与 jit 的同名，故以 xoption 别名区分。
+	o := new(providerOpts)
+	xoption.Apply(o, opts...)
+
+	clientOpts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	if o.baseURL != "" {
+		clientOpts = append(clientOpts, option.WithBaseURL(o.baseURL))
 	}
 
 	return &OpenAIProvider{
 		model:  model,
-		client: openai.NewClient(option.WithAPIKey(apiKey)),
+		client: openai.NewClient(clientOpts...),
 	}, nil
 }
 

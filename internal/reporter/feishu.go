@@ -39,8 +39,9 @@ type FeishuBot struct {
 
 // NewFeishuBot 创建飞书机器人。
 // eng 与 sessions 均由调用方 ( 组合根 ) 注入:
-// 会话是进程级领域状态，不归机器人私有，多入口共享同一管理器，
-// 保证同一 chatID 在任何入口都命中同一个会话。
+//
+//	会话是进程级领域状态，不归机器人私有，多入口共享同一管理器，
+//	保证同一 chatID 在任何入口都命中同一个会话。
 func NewFeishuBot(appID, appSecret, workspace string, eng *engine.AgentEngine, sessions *engine.SessionManager) (*FeishuBot, error) {
 	if appID == "" || appSecret == "" {
 		return nil, fmt.Errorf("appID or appSecret is empty")
@@ -75,7 +76,7 @@ func (b *FeishuBot) StartWithWebSocket(ctx context.Context, eventEncryptKey, ver
 		return fmt.Errorf("eventEncryptKey or verificationToken is empty")
 	}
 
-	slog.Info("[feishu] 正在以 WebSocket 模式启动飞书客户端...")
+	slog.Info("[feishu] 正在以 WebSocket 模式启动飞书机器人客户端...")
 
 	eventDispatcher := dispatcher.NewEventDispatcher(verificationToken, eventEncryptKey).
 		OnP2MessageReceiveV1(func(_ context.Context, event *larkim.P2MessageReceiveV1) error {
@@ -93,7 +94,7 @@ func (b *FeishuBot) StartWithWebSocket(ctx context.Context, eventEncryptKey, ver
 
 			if ok && text != "" {
 				// 调用引擎处理消息。
-				go b.handleAgentRun(ctx, chatID, text)
+				go b.agentRun(ctx, chatID, text)
 			}
 
 			return nil
@@ -120,7 +121,7 @@ func (b *FeishuBot) StartWithWebSocket(ctx context.Context, eventEncryptKey, ver
 	return nil
 }
 
-func (b *FeishuBot) handleAgentRun(ctx context.Context, chatID, prompt string) {
+func (b *FeishuBot) agentRun(ctx context.Context, chatID, prompt string) {
 	reporter := NewFeishuReporter(b.client, chatID)
 
 	// 飞书会话 ( chatID ) 与 Agent 会话一一对应，跨消息累积上下文。

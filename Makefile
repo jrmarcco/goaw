@@ -21,6 +21,11 @@ check:
 	@$(MAKE) --no-print-directory fmt
 	@$(MAKE) --no-print-directory tidy
 
+# static check with go vet
+.PHONY: vet
+vet:
+	@go vet ./...
+
 # lint code
 .PHONY: lint
 lint:

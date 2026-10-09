@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/jrmarcco/goaw/internal/schema"
+	xoption "github.com/jrmarcco/jit/xbean/option"
 )
 
 var _ LLMProvider = (*AnthropicProvider)(nil)
@@ -19,23 +19,27 @@ type AnthropicProvider struct {
 	client anthropic.Client
 }
 
-func NewAnthropicProvider(model string) (*AnthropicProvider, error) {
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+func NewAnthropicProvider(apiKey, model string, opts ...Opt) (*AnthropicProvider, error) {
 	if apiKey == "" {
-		return nil, errors.New("ANTHROPIC_API_KEY is not set")
+		return nil, errors.New("anthropic: api key is empty")
 	}
 
-	baseURL := os.Getenv("ANTHROPIC_BASE_URL")
-	if baseURL != "" {
-		return &AnthropicProvider{
-			model:  model,
-			client: anthropic.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL)),
-		}, nil
+	if model == "" {
+		return nil, errors.New("anthropic: model is empty")
+	}
+
+	// SDK 自带 option 包与 jit 的同名，故以 xoption 别名区分。
+	o := new(providerOpts)
+	xoption.Apply(o, opts...)
+
+	clientOpts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	if o.baseURL != "" {
+		clientOpts = append(clientOpts, option.WithBaseURL(o.baseURL))
 	}
 
 	return &AnthropicProvider{
 		model:  model,
-		client: anthropic.NewClient(option.WithAPIKey(apiKey)),
+		client: anthropic.NewClient(clientOpts...),
 	}, nil
 }
 
