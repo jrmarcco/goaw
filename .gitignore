@@ -23,11 +23,10 @@
 .vscode
 .zcode
 
-**/.DS_Store
-
 # 前端相关
-# dependencies
-/node_modules
+node_modules/
+dist/
+release/
 /.pnp
 .pnp.*
 .yarn/*
@@ -47,7 +46,7 @@
 /build
 
 # misc
-.DS_Store
+**/.DS_Store
 *.pem
 
 # debug
