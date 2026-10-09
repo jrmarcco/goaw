@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"github.com/jrmarcco/goaw/internal/engine"
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/reporter"
+	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
 )
 
@@ -29,12 +31,12 @@ func main() {
 
 	// 通过命令行参数接收用户 prompt。
 	// go run cmd/claw/main.go -prompt="我需要你搭建一个极简的 Go 语言 Web Server 项目。"
-	// prompt := flag.String("prompt", "", "提交给 Agent 执行的任务描述。")
-	// flag.Parse()
+	prompt := flag.String("prompt", "", "提交给 Agent 执行的任务描述。")
+	flag.Parse()
 
-	// if *prompt == "" {
-	// 	os.Exit(1)
-	// }
+	if *prompt == "" {
+		os.Exit(1)
+	}
 
 	fmt.Println("🚀 欢迎使用 goaw!")
 
@@ -85,35 +87,23 @@ func main() {
 	// 	slog.Info("飞书机器人启动成功")
 	// }()
 
-	bot, err := createFeishuBot(eng, sessions, workspace)
-	if err != nil {
-		slog.Error("创建飞书机器人失败", "error", err)
-		return
-	}
-	slog.Info("飞书机器人创建成功")
-
-	if err := startFeishuBot(bot); err != nil {
-		slog.Error("启动飞书机器人失败", "error", err)
-		return
-	}
-	slog.Info("飞书机器人启动成功")
-
 	// TODO: 测试用。
-	// tr := reporter.NewTerminalReporter()
-	// sess := sessions.Get("test_web_server_session", workspace, false)
+	tr := reporter.NewTerminalReporter()
+	sess := sessions.Get("test_web_server_session", workspace, false)
 
-	// log.Printf("\n>>> 🚀 收到指令: %s\n", *prompt)
+	log.Printf("\n>>> 🚀 收到指令: %s\n", *prompt)
 
-	// sess.Append(schema.Message{
-	// 	Role:    schema.RoleUser,
-	// 	Content: *prompt,
-	// })
+	sess.Append(schema.Message{
+		Role:    schema.RoleUser,
+		Content: *prompt,
+	})
 
-	// if err := eng.Run(context.Background(), sess, tr); err != nil {
-	// 	log.Fatalf("引擎运行崩溃: %v", err)
-	// }
+	if err := eng.Run(context.Background(), sess, tr); err != nil {
+		log.Fatalf("引擎运行崩溃: %v", err)
+	}
 }
 
+//nolint:unused // 测试调试阶段。
 func createFeishuBot(eng *engine.AgentEngine, sessions *engine.SessionManager, workspace string) (*reporter.FeishuBot, error) {
 	appID := os.Getenv("FEISHU_APP_ID")
 	appSecret := os.Getenv("FEISHU_APP_SECRET")
@@ -126,6 +116,7 @@ func createFeishuBot(eng *engine.AgentEngine, sessions *engine.SessionManager, w
 	return bot, nil
 }
 
+//nolint:unused // 测试调试阶段。
 func startFeishuBot(bot *reporter.FeishuBot) error {
 	eventEncryptKey := os.Getenv("FEISHU_EVENT_ENCRYPT_KEY")
 	verificationToken := os.Getenv("FEISHU_VERIFICATION_TOKEN")
