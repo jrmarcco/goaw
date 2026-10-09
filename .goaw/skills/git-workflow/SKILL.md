@@ -1,6 +1,6 @@
 ---
 name: git-workflow
-description: 当用户要求你“提交代码”、“保存变更”或执行 Git 相关操作时，必须使用此技能。
+description: 当用户要求你 "提交代码"、"保存变更" 或执行 Git 相关操作时，必须使用此技能。
 ---
 
 # 提交流程 SOP

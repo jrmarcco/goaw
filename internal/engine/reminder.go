@@ -16,10 +16,11 @@ const defaultRemindThreshold = 3
 var reminderPrompt string
 
 // ReminderInjector 负责运行时监控上下文，并在模型陷入死循环时注入打断信息。
-// 以轮次为计数单位: 同一指纹连续 N 个轮次失败才触发，
-// 其他工具的成功不清空在途指纹的计数 ( 交错型死循环仍可检出 )。
-// 实例挂载在 Session 上与 Compactor 同生命周期，计数跨 turn 存活、Run 开始时重置;
-// 仅在 Run 的串行路径 ( execToolCalls 的 Wait 之后 ) 上访问，自身无锁。
+// 以轮次为计数单位:
+//
+//	同一指纹连续 N 个轮次失败才触发，其他工具的成功不清空在途指纹的计数 ( 交错型死循环仍可检出 )。
+//	实例挂载在 Session 上与 Compactor 同生命周期，计数跨 turn 存活、Run 开始时重置;
+//	仅在 Run 的串行路径 ( execToolCalls 的 Wait 之后 ) 上访问，自身无锁。
 type ReminderInjector struct {
 	threshold int
 
@@ -101,7 +102,7 @@ func (i *ReminderInjector) CheckAndInject(
 }
 
 // Reset 清空全部失败计数。
-// 计数语义是 "连续轮次"，不跨 Run:
+// 计数语义是 "连续轮次" 不跨 Run:
 // 新一次运行代表新的任务上下文，残留计数会让 "连续" 措辞失真。
 func (i *ReminderInjector) Reset() {
 	i.consecutiveFailures = make(map[uint64]int)

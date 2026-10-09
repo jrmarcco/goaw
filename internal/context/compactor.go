@@ -153,7 +153,7 @@ func (c *Compactor) Compact(msgs []schema.Message) []schema.Message {
 // 说明:
 //
 //	act 请求的工具定义开销会被一并计入样本，使系数略微偏高，
-//	这符合“宁可高估也不能低估”的原则，EWMA 会自动抹平该系统性偏差。
+//	这符合 "宁可高估也不能低估" 的原则，EWMA 会自动抹平该系统性偏差。
 func (c *Compactor) Observe(promptTokens int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

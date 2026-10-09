@@ -214,11 +214,10 @@ func (e *AgentEngine) act(
 }
 
 // execToolCalls 并发工具调用。
-// 死循环检测 ( CheckAndInject ) 以轮次为单位评估整个批次，
-// 且必须留在 Wait 之后的串行路径上: ReminderInjector 的失败计数无锁，
-// 不可进入并发 goroutine;
-// 注入的 Reminder 作为观察结果的最后一条消息追加，
-// 保证下一次模型请求中拥有最高的近因效应权重。
+// 死循环检测 ( CheckAndInject ) 以轮次为单位评估整个批次，且必须留在 Wait 之后的串行路径上: R
+//
+//	eminderInjector 的失败计数无锁，不可进入并发 goroutine;
+//	注入的 Reminder 作为观察结果的最后一条消息追加，保证下一次模型请求中拥有最高的近因效应权重。
 func (e *AgentEngine) execToolCalls(
 	ctx context.Context,
 	sess *Session,
