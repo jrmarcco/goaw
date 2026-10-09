@@ -7,6 +7,7 @@ type ToolErrorCode string
 
 const (
 	ErrCodeToolNotFound     ToolErrorCode = "ERR_TOOL_NOT_FOUND"    // 模型幻觉调用了未注册的工具
+	ErrCodeCallIntercepted  ToolErrorCode = "ERR_CALL_INTERCEPTED"  // Middleware 拦截拒绝工具调用
 	ErrCodeInvalidArgs      ToolErrorCode = "ERR_INVALID_ARGS"      // 工具参数 JSON 解析失败
 	ErrCodePathEscape       ToolErrorCode = "ERR_PATH_ESCAPE"       // 路径逃逸出工作区
 	ErrCodeNoWorkspace      ToolErrorCode = "ERR_NO_WORKSPACE"      // 执行上下文缺少工作区
