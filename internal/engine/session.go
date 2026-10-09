@@ -25,6 +25,7 @@ const (
 //   - Workspace: 工具执行范围与 System Prompt 构建所依据的工作区。
 //   - PlanMode: 会话运行模式，决定 System Prompt 是否注入长程任务规范。
 //   - history: 会话的完整上下文历史，跨多次 Run 持久累积。
+//   - injector: 会话级死循环监控器，失败计数跨 turn 存活、Run 开始时重置。
 //   - compactor: 会话级自适应压缩器，Token 水位线与校准系数跨 Run 存活。
 type Session struct {
 	mu sync.RWMutex
@@ -38,6 +39,7 @@ type Session struct {
 
 	history []schema.Message
 
+	injector  *ReminderInjector
 	compactor *icontext.Compactor
 
 	// running 会话级运行互斥标志。
@@ -57,6 +59,7 @@ func NewSession(id, workspace string, planMode bool) *Session {
 		UpdatedAt: now,
 
 		history:   make([]schema.Message, 0),
+		injector:  NewReminderInjector(),
 		compactor: icontext.NewCompactor(defaultContextWindow, defaultReserveTokens, defaultRetainLastMsg),
 	}
 }

@@ -56,7 +56,7 @@ func main() {
 		tools.NewBashExecutor(),
 	)
 
-	eng, err := engine.NewAgentEngine(llmProvider, toolRegistry, true)
+	eng, err := engine.NewAgentEngine(llmProvider, toolRegistry, false)
 	if err != nil {
 		log.Fatalf("创建 Agent 引擎失败: %v", err)
 	}
@@ -83,7 +83,7 @@ func main() {
 
 	// TODO: 测试用
 	tr := reporter.NewTerminalReporter()
-	sess := sessions.Get("test_web_server_session", workspace, true)
+	sess := sessions.Get("test_web_server_session", workspace, false)
 
 	log.Printf("\n>>> 🚀 收到指令: %s\n", *prompt)
 

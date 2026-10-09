@@ -66,6 +66,10 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter)
 	}
 	defer sess.EndRun()
 
+	// 死循环检测的失败计数语义是 "连续轮次"，不跨 Run:
+	// 新一次运行代表新的任务上下文，残留计数会让 "连续" 措辞失真。
+	sess.injector.Reset()
+
 	// 工作区经由 context 流向所有工具调用。
 	ctx = tools.WithWorkspace(ctx, sess.Workspace)
 
@@ -134,11 +138,12 @@ func (e *AgentEngine) runTurn(
 		return true, nil
 	}
 
-	observations, err := e.execToolCalls(ctx, actGen.Message.ToolCalls, reporter)
+	observations, err := e.execToolCalls(ctx, sess, actGen.Message.ToolCalls, reporter)
 	if err != nil {
 		return false, err
 	}
 	sess.Append(observations...)
+
 	return false, nil
 }
 
@@ -208,23 +213,32 @@ func (e *AgentEngine) act(
 	return actGen, nil
 }
 
-// execToolCalls 并发执行工具调用。
+// execToolCalls 并发工具调用。
+// 死循环检测 ( CheckAndInject ) 以轮次为单位评估整个批次，
+// 且必须留在 Wait 之后的串行路径上: ReminderInjector 的失败计数无锁，
+// 不可进入并发 goroutine;
+// 注入的 Reminder 作为观察结果的最后一条消息追加，
+// 保证下一次模型请求中拥有最高的近因效应权重。
 func (e *AgentEngine) execToolCalls(
 	ctx context.Context,
+	sess *Session,
 	toolCalls []schema.ToolCall,
 	reporter Reporter,
 ) ([]schema.Message, error) {
 	slog.Info("[engine] 模型请求并发执行工具调用...", "tool_count", len(toolCalls))
 
 	observations := make([]schema.Message, len(toolCalls))
+	results := make([]schema.ToolCallResult, len(toolCalls))
+
 	errGroup, groupCtx := errgroup.WithContext(ctx)
 	for idx, toolCall := range toolCalls {
 		errGroup.Go(func() error {
-			observation, err := e.execToolCall(groupCtx, toolCall, reporter, idx)
+			observation, result, err := e.execToolCall(groupCtx, toolCall, reporter, idx)
 			if err != nil {
 				return err
 			}
 			observations[idx] = observation
+			results[idx] = result
 			return nil
 		})
 	}
@@ -235,18 +249,23 @@ func (e *AgentEngine) execToolCalls(
 	if err := checkCanceled(ctx); err != nil {
 		return nil, err
 	}
+
+	if reminder := sess.injector.CheckAndInject(toolCalls, results); reminder != nil {
+		observations = append(observations, *reminder)
+	}
 	return observations, nil
 }
 
-// execToolCall 工具调用执行逻辑。
+// execToolCall 工具调用逻辑。
+// 原始的 ToolCallResult 随观察消息一并返回，供串行路径上的死循环检测消费。
 func (e *AgentEngine) execToolCall(
 	ctx context.Context,
 	toolCall schema.ToolCall,
 	reporter Reporter,
 	gidx int,
-) (schema.Message, error) {
+) (schema.Message, schema.ToolCallResult, error) {
 	if err := checkCanceled(ctx); err != nil {
-		return schema.Message{}, err
+		return schema.Message{}, schema.ToolCallResult{}, err
 	}
 
 	slog.Info(
@@ -259,12 +278,12 @@ func (e *AgentEngine) execToolCall(
 		_ = reporter.OnToolCall(ctx, toolCall.Name, string(toolCall.Args))
 	}
 	if err := checkCanceled(ctx); err != nil {
-		return schema.Message{}, err
+		return schema.Message{}, schema.ToolCallResult{}, err
 	}
 
 	result := e.registry.Execute(ctx, toolCall)
 	if err := checkCanceled(ctx); err != nil {
-		return schema.Message{}, err
+		return schema.Message{}, schema.ToolCallResult{}, err
 	}
 
 	finalOutput := result.Output
@@ -272,7 +291,7 @@ func (e *AgentEngine) execToolCall(
 		// 发生错误时，按领域错误码注入救援指南。
 		finalOutput = e.recovery.AnalyzeAndInject(toolCall.Name, result.ErrorCode, result.Output)
 		slog.Error(
-			"[engine] -> 工具调用失败，注入救援指南。",
+			"[engine] -> 工具执行失败，注入救援指南。",
 			"goroutine_index", gidx,
 			"tool_name", toolCall.Name,
 			"error_code", result.ErrorCode,
@@ -294,14 +313,14 @@ func (e *AgentEngine) execToolCall(
 		_ = reporter.OnToolCallResult(ctx, toolCall.Name, finalOutput, result.IsError)
 	}
 	if err := checkCanceled(ctx); err != nil {
-		return schema.Message{}, err
+		return schema.Message{}, schema.ToolCallResult{}, err
 	}
 
 	return schema.Message{
 		Role:       schema.RoleUser,
 		Content:    finalOutput,
 		ToolCallID: toolCall.ID,
-	}, nil
+	}, result, nil
 }
 
 func checkCanceled(ctx context.Context) error {

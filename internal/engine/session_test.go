@@ -6,12 +6,6 @@ import (
 	"github.com/jrmarcco/goaw/internal/schema"
 )
 
-// testToolCallID1 测试用 ToolCall 标识。
-const testToolCallID1 = "tc-1"
-
-// testToolCallID2 测试用 ToolCall 标识。
-const testToolCallID2 = "tc-2"
-
 func TestSessionRunGuard(t *testing.T) {
 	t.Parallel()
 
@@ -126,7 +120,7 @@ func TestGetWorkingMemory(t *testing.T) {
 			schema.Message{
 				Role: schema.RoleAssistant,
 				ToolCalls: []schema.ToolCall{
-					{ID: testToolCallID1, Name: "bash", Args: []byte(`{}`)},
+					{ID: testToolCallID1, Name: testToolName, Args: []byte(`{}`)},
 				},
 			},
 			schema.Message{Role: schema.RoleUser, Content: "output", ToolCallID: testToolCallID1},
@@ -155,7 +149,7 @@ func TestGetWorkingMemory(t *testing.T) {
 			schema.Message{
 				Role: schema.RoleAssistant,
 				ToolCalls: []schema.ToolCall{
-					{ID: testToolCallID1, Name: "bash", Args: []byte(`{}`)},
+					{ID: testToolCallID1, Name: testToolName, Args: []byte(`{}`)},
 					{ID: testToolCallID2, Name: "file_reader", Args: []byte(`{}`)},
 				},
 			},
