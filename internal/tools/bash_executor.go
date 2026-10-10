@@ -78,7 +78,7 @@ func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (strin
 	defer cancel()
 
 	// 在 MacOS/Linux 上通过将命令包在 `bash -c`　中执行，以支持环境变量、管道、逻辑运算等复杂 Shell 特性。
-	//nolint:gosec // G204: Bash Executor的职责就是执行模型给出的任意命令，命令内容必然是外部输入。
+	//nolint:gosec // G204: Bash Executor 的职责就是执行模型给出的任意命令，命令内容必然是外部输入。
 	cmd := exec.CommandContext(timeoutCtx, "bash", "-c", input.Command)
 
 	// 设置工作区目录，确保命令在工作区下执行。
@@ -101,11 +101,12 @@ func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (strin
 	}
 
 	// 错误回传 ( Self-Correction 自愈机制 )。
+	//
 	// 注意:
-	//  当 bash 报错时绝对不能反悔 Go 的 error 阻断程序。
-	//  必须把 err 和 output 一起返回给模型，让模型的自纠能力分析报错。
-	//  因此命令失败统一标记为软失败 ( Soft )：Registry 不置 IsError，输出照常回传，
-	//  仅通过错误码 ( 见 classifyCmdFailure ) 向恢复层提供精准的分类信号。
+	// 当 bash 报错时绝对不能反悔 Go 的 error 阻断程序。
+	// 必须把 err 和 output 一起返回给模型，让模型的自纠能力分析报错。
+	// 因此命令失败统一标记为软失败 ( Soft )：Registry 不置 IsError，输出照常回传，
+	// 仅通过错误码 ( 见 classifyCmdFailure ) 向恢复层提供精准的分类信号。
 	if err != nil {
 		return "", &ToolError{
 			Code: classifyCmdFailure(err, string(out)),

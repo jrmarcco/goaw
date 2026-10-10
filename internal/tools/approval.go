@@ -41,8 +41,8 @@ type ApprovalResult struct {
 	Remember bool             `json:"remember,omitempty"`
 }
 
-// Allowed 报告本次审核是否放行。
-func (r ApprovalResult) Allowed() bool {
+// Approved 报告本次审核是否放行。
+func (r ApprovalResult) Approved() bool {
 	return r.Decision == DecisionApproved
 }
 
@@ -82,6 +82,8 @@ type Approver interface {
 }
 
 // ApproverFunc 函数适配器，让闭包直接作为 Approver 使用。
+// 注意：
+// Go 语言的这个设计是为了解决 "函数不能直接当接口用" 的问题。
 type ApproverFunc func(ctx context.Context, tc schema.ToolCall) ApprovalResult
 
 func (f ApproverFunc) RequestApproval(ctx context.Context, tc schema.ToolCall) ApprovalResult {
@@ -204,7 +206,7 @@ func (m *ApprovalManager) Approve(ctx context.Context, tc schema.ToolCall) Appro
 func (m *ApprovalManager) Middleware() Middleware {
 	return func(ctx context.Context, tc schema.ToolCall) (bool, string) {
 		result := m.Approve(ctx, tc)
-		if result.Allowed() {
+		if result.Approved() {
 			slog.Debug(
 				"[approval] 工具调用审核通过",
 				"tool_name", tc.Name,

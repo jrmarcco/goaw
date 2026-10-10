@@ -58,12 +58,12 @@ func (c *PromptComposer) Build() (schema.Message, error) {
 	// 构建系统提示词。
 	var builder strings.Builder
 
-	// 1.极简内核 ( Minimal Core)。
+	// 1. 极简内核 ( Minimal Core)。
 	// 确立基本身份与最底线的纪律。
 	builder.WriteString(corePrompt)
 
 	if c.planMode {
-		// 2.引入状态嗅探与断点续传。
+		// 2. 引入状态嗅探与断点续传。
 		builder.WriteString(planModePrompt)
 	}
 

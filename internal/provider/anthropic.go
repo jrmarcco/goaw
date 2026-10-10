@@ -44,13 +44,13 @@ func NewAnthropicProvider(apiKey, model string, opts ...Opt) (*AnthropicProvider
 }
 
 func (p *AnthropicProvider) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Generation, error) {
-	// 1.解析上下文消息。
+	// 1. 解析上下文消息。
 	systemPrompt, anthropicMsgs := p.transContextMessage(msgs)
 
-	// 2.转换工具 Schema。
+	// 2. 转换工具 Schema。
 	anthropicTools := p.transToolDef(availableTools)
 
-	// 3.构建请求。
+	// 3. 构建请求。
 	const maxTokens = 8192
 	params := anthropic.MessageNewParams{
 		Model:     p.model,
@@ -73,7 +73,7 @@ func (p *AnthropicProvider) Generate(ctx context.Context, msgs []schema.Message,
 		return nil, fmt.Errorf("failed to generate response: %w", err)
 	}
 
-	// 4.解析响应信息。
+	// 4. 解析响应信息。
 	res := &schema.Generation{
 		Message: schema.Message{
 			Role: schema.RoleAssistant,
