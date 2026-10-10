@@ -20,5 +20,6 @@ const (
 	ErrCodeCmdNotFound      ToolErrorCode = "ERR_CMD_NOT_FOUND"     // bash 退出码 127 ( command not found )
 	ErrCodeCmdSyntaxError   ToolErrorCode = "ERR_CMD_SYNTAX_ERROR"  // bash 语法错误 ( best-effort 文案匹配 )
 	ErrCodeCmdFailed        ToolErrorCode = "ERR_CMD_FAILED"        // bash 其他非零退出码
+	ErrCodeSubagentFailed   ToolErrorCode = "ERR_SUBAGENT_FAILED"   // SubAgent 运行失败 ( 软失败，主 Agent 可自纠重试 )
 	ErrCodeUnknown          ToolErrorCode = "ERR_UNKNOWN"           // 未分类的外来 error
 )

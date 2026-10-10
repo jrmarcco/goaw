@@ -74,6 +74,23 @@ func main() {
 		log.Fatalf("创建 Agent 引擎失败: %v", err)
 	}
 
+	// Multi-Agent: SubAgent 使用独立的只读注册表 ( 不含 spawn_subagent，天然无递归 )，
+	// 引擎在主引擎构造完成后注册，解决 "runner 依赖引擎、引擎依赖注册表" 的对象级循环。
+	subRegistry := tools.NewDefaultRegistry(
+		tools.NewFileReader(),
+	)
+	subRunner, err := engine.NewSubAgentRunner(llmProvider, false)
+	if err != nil {
+		log.Fatalf("创建 SubAgent 运行器失败: %v", err)
+	}
+	subagentTool, err := tools.NewSubagentTool(subRunner, subRegistry, nil)
+	if err != nil {
+		log.Fatalf("创建 SubAgent 工具失败: %v", err)
+	}
+	if err := toolRegistry.Register(subagentTool); err != nil {
+		log.Fatalf("注册 SubAgent 工具失败: %v", err)
+	}
+
 	// 会话管理器为进程级单例，由所有入口 ( 飞书机器人、终端 ) 共享，
 	// 保证同一会话 ID 在任何入口都命中同一个会话。
 	sessions := engine.NewSessionManager()

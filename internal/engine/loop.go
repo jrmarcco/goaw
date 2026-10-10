@@ -70,8 +70,10 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter)
 	// 新一次运行代表新的任务上下文，残留计数会让 "连续" 措辞失真。
 	sess.injector.Reset()
 
-	// 工作区经由 context 流向所有工具调用。
+	// 工作区与运行期 Reporter 经由 context 流向所有工具调用:
+	// 工具实例进程级共享，不持有任何运行态 ( 见 SubagentTool 的事件上报 )。
 	ctx = tools.WithWorkspace(ctx, sess.Workspace)
+	ctx = tools.WithSubReporter(ctx, reporter)
 
 	slog.Info("[engine] Agent 引擎启动", "session", sess.ID, "workspace", sess.Workspace)
 	slog.Info("[engine] 慢思考模式", "enabled", e.thinkMode)

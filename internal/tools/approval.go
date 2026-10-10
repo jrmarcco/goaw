@@ -53,6 +53,8 @@ type ApprovalPolicy interface {
 }
 
 // ApprovalPolicyFunc 函数适配器，让闭包直接作为 ApprovalPolicy 使用。
+// 注意：
+// Go 语言的这个设计是为了解决 "函数不能直接当接口用" 的问题。
 type ApprovalPolicyFunc func(tc schema.ToolCall) bool
 
 func (f ApprovalPolicyFunc) NeedsApproval(tc schema.ToolCall) bool {
@@ -82,8 +84,6 @@ type Approver interface {
 }
 
 // ApproverFunc 函数适配器，让闭包直接作为 Approver 使用。
-// 注意：
-// Go 语言的这个设计是为了解决 "函数不能直接当接口用" 的问题。
 type ApproverFunc func(ctx context.Context, tc schema.ToolCall) ApprovalResult
 
 func (f ApproverFunc) RequestApproval(ctx context.Context, tc schema.ToolCall) ApprovalResult {
