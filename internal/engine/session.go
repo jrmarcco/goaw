@@ -134,9 +134,9 @@ func isPlainUserMessage(msg schema.Message) bool {
 }
 
 // SessionManager 进程级会话注册表。
-// 保证会话标识到 Session 实例的唯一映射:
 //
-//	同一 ID 在任意入口 ( 飞书机器人、终端 ) 都命中同一个会话，跨入口共享上下文。
+// 保证会话标识到 Session 实例的唯一映射:
+// 同一 ID 在任意入口 ( 飞书机器人、终端 ) 都命中同一个会话，跨入口共享上下文。
 //
 // 由组合根 ( main ) 创建并注入各入口，不归任何单一入口私有;
 // 当前为纯内存实现，会话只增不减，淘汰与持久化待 SessionStorage 落地。

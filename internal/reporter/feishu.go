@@ -32,6 +32,9 @@ type FeishuBot struct {
 	client *lark.Client
 	engine *engine.AgentEngine
 
+	// approver 飞书人工审核器，经 Approver 暴露给组合根注册为工具审核中间件。
+	approver *FeishuApprover
+
 	// sessions 组合根注入的会话管理器，进程内所有入口共享，
 	// 飞书 chatID 与 Agent 会话一一对应。
 	sessions *engine.SessionManager
@@ -56,6 +59,8 @@ func NewFeishuBot(appID, appSecret, workspace string, eng *engine.AgentEngine, s
 	const defaultAgentRunTimeout = 10 * time.Minute
 	const defaultMessageSendTimeout = 10 * time.Second
 
+	client := lark.NewClient(appID, appSecret)
+
 	return &FeishuBot{
 		appID:     appID,
 		appSecret: appSecret,
@@ -65,10 +70,18 @@ func NewFeishuBot(appID, appSecret, workspace string, eng *engine.AgentEngine, s
 		agentRunTimeout:    defaultAgentRunTimeout,
 		messageSendTimeout: defaultMessageSendTimeout,
 
-		client:   lark.NewClient(appID, appSecret),
+		client:   client,
 		engine:   eng,
+		approver: NewFeishuApprover(client),
 		sessions: sessions,
 	}, nil
+}
+
+// Approver 返回飞书人工审核器。
+// 组合根将其注册为 ApprovalManager 的人工审核实现，
+// 口令回复经 StartWithWebSocket 的事件回调路由，无需额外接线。
+func (b *FeishuBot) Approver() *FeishuApprover {
+	return b.approver
 }
 
 func (b *FeishuBot) StartWithWebSocket(ctx context.Context, eventEncryptKey, verificationToken string) error {
@@ -79,7 +92,7 @@ func (b *FeishuBot) StartWithWebSocket(ctx context.Context, eventEncryptKey, ver
 	slog.Info("[feishu] 正在以 WebSocket 模式启动飞书机器人客户端...")
 
 	eventDispatcher := dispatcher.NewEventDispatcher(verificationToken, eventEncryptKey).
-		OnP2MessageReceiveV1(func(_ context.Context, event *larkim.P2MessageReceiveV1) error {
+		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 			chatID := *event.Event.Message.ChatId
 			content := *event.Event.Message.Content
 
@@ -93,7 +106,12 @@ func (b *FeishuBot) StartWithWebSocket(ctx context.Context, eventEncryptKey, ver
 			slog.Debug("[feishu] 收到飞书消息", "chat_id", chatID, "text", text)
 
 			if ok && text != "" {
-				// 调用引擎处理消息。
+				// 审核口令优先拦截，路由给等待中的审核请求;
+				// 普通消息才作为 prompt 交给引擎处理。
+				if b.approver.TryResolve(ctx, chatID, text) {
+					return nil
+				}
+
 				go b.agentRun(ctx, chatID, text)
 			}
 
@@ -122,6 +140,9 @@ func (b *FeishuBot) StartWithWebSocket(ctx context.Context, eventEncryptKey, ver
 }
 
 func (b *FeishuBot) agentRun(ctx context.Context, chatID, prompt string) {
+	// chatID 经 context 流向工具层，FeishuApprover 据此路由审核消息。
+	ctx = withFeishuChatID(ctx, chatID)
+
 	reporter := NewFeishuReporter(b.client, chatID)
 
 	// 飞书会话 ( chatID ) 与 Agent 会话一一对应，跨消息累积上下文。

@@ -109,11 +109,10 @@ func (e *FileEditor) Execute(ctx context.Context, args json.RawMessage) (string,
 
 // fuzzyReplace 四级容错降级替换算法。
 // 四级容错:
-//
-//	L1: 最快最安全的精确匹配。
-//	L2: 解决不同操作系统 ( Windows vs Unix ) 换行符导致的幻觉。
-//	L3: 忽略整个代码块首尾的多余空行。
-//	L4: ** ( 核心容错 ) ** 将 oldContent 和原始文件都按行切分，去掉每一行的首尾空格 ( 消除缩进差异 )，然后再进行比对。
+// L1: 最快最安全的精确匹配。
+// L2: 解决不同操作系统 ( Windows vs Unix ) 换行符导致的幻觉。
+// L3: 忽略整个代码块首尾的多余空行。
+// L4: ** ( 核心容错 ) ** 将 oldContent 和原始文件都按行切分，去掉每一行的首尾空格 ( 消除缩进差异 )，然后再进行比对。
 func (e *FileEditor) fuzzyReplace(oriContent, oldContent, newContent string) (string, error) {
 	// L1: 精确匹配。
 	cnt := strings.Count(oriContent, oldContent)

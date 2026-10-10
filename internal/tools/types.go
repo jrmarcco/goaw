@@ -14,7 +14,7 @@ const (
 )
 
 // Middleware 是工具执行中间件。
-type Middleware func(ctx context.Context, tc schema.ToolCall) (allowed bool, rejectReason string)
+type Middleware func(ctx context.Context, tc schema.ToolCall) (approved bool, rejectReason string)
 
 // Registry 定义了工具的注册与分发执行接口。
 type Registry interface {

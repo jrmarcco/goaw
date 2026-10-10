@@ -96,8 +96,8 @@ func (r *DefaultRegistry) Execute(ctx context.Context, tc schema.ToolCall) schem
 
 	// 依次执行 Middleware。
 	for _, mw := range r.middlewares {
-		allowed, reason := mw(ctx, tc)
-		if !allowed {
+		approved, reason := mw(ctx, tc)
+		if !approved {
 			slog.Info("[registry] 工具调用被拦截", "tool_name", tc.Name, "reject_reason", reason)
 			return schema.ToolCallResult{
 				ID:        tc.ID,

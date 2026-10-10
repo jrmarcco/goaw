@@ -63,6 +63,12 @@ func main() {
 		tools.NewBashExecutor(),
 	)
 
+	// 只读工具自动放行，写/执行类工具进入终端人工审核。
+	approvalManager := tools.NewApprovalManager(
+		tools.ApprovalManagerWithApprover(reporter.NewTerminalApprover()),
+	)
+	toolRegistry.Use(approvalManager.Middleware())
+
 	eng, err := engine.NewAgentEngine(llmProvider, toolRegistry, false)
 	if err != nil {
 		log.Fatalf("创建 Agent 引擎失败: %v", err)
@@ -73,7 +79,7 @@ func main() {
 	sessions := engine.NewSessionManager()
 
 	// go func() {
-	// 	bot, err := createFeishuBot(eng, sessions, workspace)
+	// 	bot, err := createFeishuBot(eng, toolRegistry, sessions, workspace)
 	// 	if err != nil {
 	// 		slog.Error("创建飞书机器人失败", "error", err)
 	// 		return
@@ -104,7 +110,7 @@ func main() {
 }
 
 //nolint:unused // 测试调试阶段。
-func createFeishuBot(eng *engine.AgentEngine, sessions *engine.SessionManager, workspace string) (*reporter.FeishuBot, error) {
+func createFeishuBot(eng *engine.AgentEngine, registry *tools.DefaultRegistry, sessions *engine.SessionManager, workspace string) (*reporter.FeishuBot, error) {
 	appID := os.Getenv("FEISHU_APP_ID")
 	appSecret := os.Getenv("FEISHU_APP_SECRET")
 
@@ -112,6 +118,15 @@ func createFeishuBot(eng *engine.AgentEngine, sessions *engine.SessionManager, w
 	if err != nil {
 		return nil, err
 	}
+
+	// 飞书入口运行时，人工审核经飞书口令交互完成。
+	// 注意: 与终端审核器互斥，启用飞书入口时应移除 main 中的终端审核器注册，
+	// 否则先注册的中间件会先阻塞等待交互。
+	registry.Use(
+		tools.NewApprovalManager(
+			tools.ApprovalManagerWithApprover(bot.Approver()),
+		).Middleware(),
+	)
 
 	return bot, nil
 }
