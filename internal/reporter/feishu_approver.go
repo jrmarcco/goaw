@@ -182,7 +182,7 @@ func (a *FeishuApprover) TryResolve(ctx context.Context, chatID, text string) bo
 // buildRequestText 构造发送给会话的审核请求文案。
 func (a *FeishuApprover) buildRequestText(reqID string, tc schema.ToolCall) string {
 	return fmt.Sprintf(
-		"⚠️ 工具 [%s] 请求人工审核 ( 编号 %s )\n参数: %s\n回复口令: 「%s %s」允许一次 / 「%s %s」总是允许 / 「%s %s」拒绝",
+		"工具 [%s] 请求人工审核 ( 编号 %s )\n参数: %s\n回复口令: 「%s %s」允许一次 / 「%s %s」总是允许 / 「%s %s」拒绝",
 		tc.Name, reqID, tc.Args,
 		approvalCmdApprove, reqID,
 		approvalCmdAlways, reqID,
