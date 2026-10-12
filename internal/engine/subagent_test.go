@@ -8,11 +8,42 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
 )
+
+// fakeCostThreshold 测试观测器的 token 预算阈值。
+const fakeCostThreshold = 1_000_000
+
+// fakeCostObserver 记录上报序列的测试替身观测器，累计总量达到阈值即报告耗尽。
+type fakeCostObserver struct {
+	mu     sync.Mutex
+	phases []string
+	total  int
+}
+
+func (f *fakeCostObserver) Observe(usage schema.Usage, phase string, _ time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.phases = append(f.phases, phase)
+	f.total += usage.PromptTokens + usage.CompletionTokens
+}
+
+func (f *fakeCostObserver) Exceeded() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.total >= fakeCostThreshold
+}
+
+// snapshot 返回并发安全的阶段序列与总量。
+func (f *fakeCostObserver) snapshot() (phases []string, total int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.phases...), f.total
+}
 
 // scriptedProvider 按脚本顺序回放的测试替身模型提供者。
 type scriptedProvider struct {
@@ -264,6 +295,78 @@ func TestSubAgentRunnerRunSubForcedFinal(t *testing.T) {
 	}
 	if !hasReminder {
 		t.Fatalf("forced final request history = %+v, want the budget-exhausted reminder", llm.lastMsgs)
+	}
+}
+
+func TestSubAgentRunnerRunSubTokenBudgetForcedFinal(t *testing.T) {
+	t.Parallel()
+
+	// subTokenConclusion token 预算耗尽后强制收尾的预期汇报。
+	//
+	//nolint:gosec // G101 误报: 测试断言文案包含 "Token" 字样被误判为硬编码凭证，并非密钥。
+	const subTokenConclusion = "Token 预算耗尽后的收尾汇报"
+
+	// 单次大用量直接击穿预算 ( 900k + 200k > 1M 阈值 )。
+	const (
+		bigPrompt     = 900_000
+		bigCompletion = 200_000
+	)
+
+	fake := &subFakeTool{}
+	llm := &scriptedProvider{gens: []*schema.Generation{
+		// 第一轮: 请求工具调用 ( 未设轮次预算，只有 token 预算触发收尾 )。
+		{Message: schema.Message{
+			Role: schema.RoleAssistant,
+			ToolCalls: []schema.ToolCall{
+				{ID: testToolCallID1, Name: fake.Name(), Args: []byte(`{}`)},
+			},
+		}, Usage: schema.Usage{PromptTokens: bigPrompt, CompletionTokens: bigCompletion}},
+		// 强制收尾轮: 无工具挂载，模型只能输出文本。
+		{Message: schema.Message{Role: schema.RoleAssistant, Content: subTokenConclusion}},
+	}}
+
+	observer := &fakeCostObserver{}
+	runner, err := NewSubAgentRunner(llm, false, SubAgentRunnerWithCostObserver(observer))
+	if err != nil {
+		t.Fatalf("NewSubAgentRunner() error = %v", err)
+	}
+
+	spec := explorerSpec("角色身份", 0, tools.NewDefaultRegistry(fake))
+	ctx := tools.WithWorkspace(context.Background(), subWorkspace(t))
+	conclusion, err := runner.RunSub(ctx, spec, "task", nil)
+	if err != nil {
+		t.Fatalf("RunSub() error = %v", err)
+	}
+
+	if conclusion != subTokenConclusion {
+		t.Fatalf("RunSub() conclusion = %q, want %q", conclusion, subTokenConclusion)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("subagent tool executed %d times, want 1", fake.calls)
+	}
+	if llm.callsCount() != 2 {
+		t.Fatalf("provider called %d times, want 2 (one tool turn + one forced final)", llm.callsCount())
+	}
+
+	// 观测序列 = act ( 击穿预算 ) + final ( 收尾补全，同样计费 )。
+	phases, total := observer.snapshot()
+	if len(phases) != 2 || phases[0] != PhaseAct || phases[1] != PhaseFinal {
+		t.Fatalf("observed phases = %v, want [%s %s]", phases, PhaseAct, PhaseFinal)
+	}
+	if total != bigPrompt+bigCompletion {
+		t.Fatalf("observed total = %d, want %d", total, bigPrompt+bigCompletion)
+	}
+
+	// 强制收尾请求的历史中必须携带 token 预算耗尽提醒。
+	hasReminder := false
+	for _, msg := range llm.lastMsgs {
+		if strings.Contains(msg.Content, "Token 预算已耗尽") {
+			hasReminder = true
+			break
+		}
+	}
+	if !hasReminder {
+		t.Fatalf("forced final request history = %+v, want the token-budget reminder", llm.lastMsgs)
 	}
 }
 

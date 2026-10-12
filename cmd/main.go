@@ -9,14 +9,25 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 
 	icontext "github.com/jrmarcco/goaw/internal/context"
 	"github.com/jrmarcco/goaw/internal/engine"
+	"github.com/jrmarcco/goaw/internal/obs"
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/reporter"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
+)
+
+const (
+	// llmModel 模型标识 ( 记账账本标签与实际调用目标 )。
+	llmModel = "glm-5.3"
+
+	// defaultTokenBudget token 预算缺省值 ( prompt+completion 合并口径，进程级累计 )，
+	// 可用环境变量 GOAW_TOKEN_BUDGET 覆盖，≤0 关闭拦截。
+	defaultTokenBudget = 1_000_000
 )
 
 func main() {
@@ -51,10 +62,13 @@ func main() {
 		llmOpts = append(llmOpts, provider.WithBaseURL(baseURL))
 	}
 
-	llmProvider, err := provider.NewAnthropicProvider(os.Getenv("ANTHROPIC_API_KEY"), "glm-5.3", llmOpts...)
+	llmProvider, err := provider.NewAnthropicProvider(os.Getenv("ANTHROPIC_API_KEY"), llmModel, llmOpts...)
 	if err != nil {
 		log.Fatalf("创建模型提供者失败: %v", err)
 	}
+
+	// CostTracker: 进程级 token 记账与预算拦截 ( 阈值 ≤0 关闭，耗尽后强制收尾 )。
+	costTracker := obs.NewCostTracker(llmModel, tokenBudgetFromEnv())
 
 	// 挂载 4 个基础工具。
 	toolRegistry := tools.NewDefaultRegistry(
@@ -70,13 +84,18 @@ func main() {
 	)
 	toolRegistry.Use(approvalManager.Middleware())
 
-	eng, err := engine.NewAgentEngine(llmProvider, toolRegistry, false)
+	eng, err := engine.NewAgentEngine(
+		llmProvider, toolRegistry, false,
+		engine.AgentEngineWithCostObserver(costTracker),
+	)
 	if err != nil {
 		log.Fatalf("创建 Agent 引擎失败: %v", err)
 	}
 
 	// Multi-Agent: SubAgent 按角色规格 ( SubAgentSpec ) 装配，角色决定 System Prompt 与工具集。
-	// Explorer 是只读信息收集角色: 注册表不含 spawn_subagent ( 天然无递归 )，
+	//
+	// Explorer 是只读信息收集角色:
+	// 注册表不含 spawn_subagent ( 天然无递归 )，
 	// bash 经白名单中间件硬性约束为只读，不挂审核中间件 ( 只读由构造保证，审核留给主 Agent 的写路径 )。
 	subRegistry := tools.NewDefaultRegistry(
 		tools.NewFileReader(),
@@ -84,7 +103,10 @@ func main() {
 	)
 	subRegistry.Use(tools.NewReadOnlyBashMiddleware())
 
-	subRunner, err := engine.NewSubAgentRunner(llmProvider, false)
+	subRunner, err := engine.NewSubAgentRunner(
+		llmProvider, false,
+		engine.SubAgentRunnerWithCostObserver(costTracker),
+	)
 	if err != nil {
 		log.Fatalf("创建 SubAgent 运行器失败: %v", err)
 	}
@@ -141,6 +163,20 @@ func main() {
 	if err := eng.Run(context.Background(), sess, tr); err != nil {
 		log.Fatalf("引擎运行崩溃: %v", err)
 	}
+}
+
+// tokenBudgetFromEnv 解析 token 预算。
+// 环境变量 GOAW_TOKEN_BUDGET 覆盖缺省值，≤0 表示关闭拦截。
+func tokenBudgetFromEnv() int {
+	raw := os.Getenv("GOAW_TOKEN_BUDGET")
+	if raw == "" {
+		return defaultTokenBudget
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		log.Fatalf("GOAW_TOKEN_BUDGET 必须是整数: %v", err)
+	}
+	return parsed
 }
 
 //nolint:unused // 测试调试阶段。

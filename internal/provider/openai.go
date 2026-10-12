@@ -71,10 +71,12 @@ func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, av
 			Role:    schema.RoleAssistant,
 			Content: choice.Content,
 		},
-		// PromptTokens 已包含缓存命中的部分 ( PromptTokensDetails.CachedTokens 是其子集 )。
+		// PromptTokens 已包含缓存命中的部分 ( PromptTokensDetails.CachedTokens 是其子集 )，
+		// 缓存命中单独透传供成本记账留痕 ( OpenAI 协议无缓存写概念，CacheCreationTokens 留 0 )。
 		Usage: schema.Usage{
 			PromptTokens:     int(resp.Usage.PromptTokens),
 			CompletionTokens: int(resp.Usage.CompletionTokens),
+			CacheReadTokens:  int(resp.Usage.PromptTokensDetails.CachedTokens),
 		},
 	}
 
@@ -116,7 +118,7 @@ func (p *OpenAIProvider) transContextMessage(msgs []schema.Message) []openai.Cha
 				},
 			}
 
-			// 如果历史包含 ToolCalls 必须原样放回，以维系模型的逻辑链
+			// 如果历史包含 ToolCalls 必须原样放回，以维系模型的逻辑链。
 			if len(msg.ToolCalls) > 0 {
 				toolCalls := make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(msg.ToolCalls))
 

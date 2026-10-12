@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	icontext "github.com/jrmarcco/goaw/internal/context"
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
+	"github.com/jrmarcco/jit/xbean/option"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -22,6 +24,10 @@ type AgentEngine struct {
 
 	thinkMode bool
 
+	// cost 进程级成本观测器 ( 系统级策略，构造期注入 )，
+	// 终端与飞书等入口共用同一引擎实例时天然全覆盖。
+	cost CostObserver
+
 	recovery *icontext.RecoveryManager
 }
 
@@ -29,6 +35,7 @@ func NewAgentEngine(
 	llmProvider provider.LLMProvider,
 	toolRegistry tools.Registry,
 	thinkMode bool,
+	opts ...option.Opt[AgentEngine],
 ) (*AgentEngine, error) {
 	if toolRegistry == nil {
 		return nil, fmt.Errorf("tool registry is required")
@@ -38,18 +45,53 @@ func NewAgentEngine(
 		return nil, fmt.Errorf("failed to register skill reader: %w", err)
 	}
 
-	return &AgentEngine{
+	eng := &AgentEngine{
 		provider: llmProvider,
 		registry: toolRegistry,
 
 		thinkMode: thinkMode,
 
 		recovery: icontext.NewRecoveryManager(),
-	}, nil
+	}
+	option.Apply(eng, opts...)
+	return eng, nil
 }
 
-// forcedFinalReminder 轮次预算耗尽时注入的收尾指令。
-const forcedFinalReminder = "工具调用预算已耗尽。请立即停止调用工具，基于已收集的信息输出最终汇报；信息不足的部分如实说明未确认。"
+// AgentEngineWithCostObserver 为引擎挂载成本观测器 ( 记账 + token 预算闸门 )。
+func AgentEngineWithCostObserver(observer CostObserver) option.Opt[AgentEngine] {
+	return func(eng *AgentEngine) {
+		eng.cost = observer
+	}
+}
+
+// CostObserver 是成本观测器规范 ( 结构化类型匹配，实现方无需依赖本包 )。
+//
+// 方法签名必须与本接口完全一致:
+// obs.CostTracker 等外部实现靠签名逐个比对隐式满足接口，任何偏差都会失去匹配，
+// 与 tools.SubReporter / engine.Reporter 的循环解法同构。
+type CostObserver interface {
+	// Observe 每次模型调用 ( think/act/final ) 后上报真实消耗与耗时。
+	Observe(usage schema.Usage, phase string, took time.Duration)
+
+	// Exceeded 返回 true 表示 token 预算已耗尽，
+	// 引擎在轮次边界消费该信号并强制收尾。
+	Exceeded() bool
+}
+
+// 模型调用阶段标记 ( Observe 的 phase 参数取值 )。
+const (
+	PhaseThink = "think" // 慢思考补全。
+	PhaseAct   = "act"   // 行动补全。
+	PhaseFinal = "final" // 预算耗尽后的强制收尾补全。
+)
+
+// forcedFinalTurnsReminder 轮次预算耗尽时注入的收尾指令。
+const forcedFinalTurnsReminder = "工具调用预算已耗尽。请立即停止调用工具，基于已收集的信息输出最终汇报；信息不足的部分如实说明未确认。"
+
+// forcedFinalTokensReminder token 预算耗尽时注入的收尾指令。
+//
+//nolint:gosec // G101 误报: 提示词文案包含 "Token" 字样被误判为硬编码凭证，并非密钥。
+const forcedFinalTokensReminder = "Token 预算已耗尽。请立即停止调用工具，基于已收集的信息输出最终汇报；信息不足的部分如实说明未确认。"
 
 // RunOption 是 AgentEngine.Run 的运行级选项。
 // 选项作用于单次运行 ( 而非引擎构造 )，同一引擎可承载不同角色的运行。
@@ -62,6 +104,14 @@ type runConfig struct {
 
 	// maxTurns 轮次预算，小于等于 0 表示不设限。
 	maxTurns int
+
+	// cost 成本观测器 ( 引擎构造级继承，系统级策略 )。
+	cost CostObserver
+
+	// 以下为 run 本地成本累计，Run 主循环单 goroutine 串行更新，无需加锁。
+	promptTokens     int
+	completionTokens int
+	calls            int
 }
 
 // buildSystemMessage 组装本次运行的 System Prompt。
@@ -82,6 +132,28 @@ func (c *runConfig) buildSystemMessage(sess *Session) (schema.Message, error) {
 // exhausted 判定轮次预算是否耗尽。
 func (c *runConfig) exhausted(turn int) bool {
 	return c.maxTurns > 0 && turn > c.maxTurns
+}
+
+// observe 上报一次模型调用成本并累计 run 本地统计 ( 观测器缺省时仅本地累计 )。
+func (c *runConfig) observe(usage schema.Usage, phase string, took time.Duration) {
+	c.calls++
+	c.promptTokens += usage.PromptTokens
+	c.completionTokens += usage.CompletionTokens
+	if c.cost != nil {
+		c.cost.Observe(usage, phase, took)
+	}
+}
+
+// forcedReminder 判定任一预算是否在轮次边界触发强制收尾，返回对应的收尾指令。
+// token 预算优先: 系统级口径比单次运行的轮次预算更重要。
+func (c *runConfig) forcedReminder(turn int) (string, bool) {
+	if c.cost != nil && c.cost.Exceeded() {
+		return forcedFinalTokensReminder, true
+	}
+	if c.exhausted(turn) {
+		return forcedFinalTurnsReminder, true
+	}
+	return "", false
 }
 
 // WithSystemComposer 以自定义组装器替换缺省的 PromptComposer。
@@ -121,6 +193,7 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter,
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	cfg.cost = e.cost
 
 	// 死循环检测的失败计数语义是 "连续轮次"，不跨 Run:
 	// 新一次运行代表新的任务上下文，残留计数会让 "连续" 措辞失真。
@@ -134,16 +207,29 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter,
 	slog.Info("[engine] Agent 引擎启动", "session", sess.ID, "workspace", sess.Workspace)
 	slog.Info("[engine] 慢思考模式", "enabled", e.thinkMode)
 
+	// 运行摘要覆盖全部返回路径 ( 正常结束、强制收尾、错误 )。
+	runStart := time.Now()
+	defer func() {
+		slog.Info(
+			"[engine] 运行结束",
+			"session", sess.ID,
+			"elapsed", time.Since(runStart),
+			"calls", cfg.calls,
+			"prompt_tokens", cfg.promptTokens,
+			"completion_tokens", cfg.completionTokens,
+		)
+	}()
+
 	systemMessage, err := cfg.buildSystemMessage(sess)
 	if err != nil {
 		return err
 	}
 
 	for turn := 1; ; turn++ {
-		if cfg.exhausted(turn) {
-			return e.forceFinalTurn(ctx, sess, systemMessage, reporter)
+		if reminder, forced := cfg.forcedReminder(turn); forced {
+			return e.forceFinalTurn(ctx, sess, systemMessage, reporter, reminder, &cfg)
 		}
-		done, err := e.runTurn(ctx, sess, systemMessage, reporter, turn)
+		done, err := e.runTurn(ctx, sess, systemMessage, reporter, turn, &cfg)
 		if err != nil {
 			return err
 		}
@@ -153,31 +239,36 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter,
 	}
 }
 
-// forceFinalTurn 轮次预算耗尽后的强制收尾。
+// forceFinalTurn 预算耗尽 ( 轮次或 token ) 后的强制收尾。
 // 注入预算耗尽提醒后剥夺工具挂载再请求一次补全——无工具时模型结构性只能输出文本，
 // 已收集的信息得以保留为最终汇报，而非随硬报错整体作废。
+// 收尾补全是真实的计费调用，同样计时并上报成本。
 // 收尾输出为空时由调用方 ( 如 RunSub 的结论校验 ) 兜底报错。
 func (e *AgentEngine) forceFinalTurn(
 	ctx context.Context,
 	sess *Session,
 	systemMessage schema.Message,
 	reporter Reporter,
+	reminder string,
+	cfg *runConfig,
 ) error {
 	if err := checkCanceled(ctx); err != nil {
 		return err
 	}
 
-	slog.Warn("[engine] 轮次预算耗尽，剥夺工具挂载，强制收尾汇报")
+	slog.Warn("[engine] 预算耗尽，剥夺工具挂载，强制收尾汇报")
 
 	sess.Append(schema.Message{
 		Role:    schema.RoleUser,
-		Content: forcedFinalReminder,
+		Content: reminder,
 	})
 
+	start := time.Now()
 	finalGen, err := e.provider.Generate(ctx, e.buildRequestHistory(systemMessage, sess), nil)
 	if err != nil {
 		return fmt.Errorf("failed to generate forced final response: %w", err)
 	}
+	cfg.observe(finalGen.Usage, PhaseFinal, time.Since(start))
 
 	content := strings.TrimSpace(finalGen.Message.Content)
 	sess.Append(schema.Message{Role: schema.RoleAssistant, Content: content})
@@ -193,6 +284,7 @@ func (e *AgentEngine) runTurn(
 	systemMessage schema.Message,
 	reporter Reporter,
 	turn int,
+	cfg *runConfig,
 ) (bool, error) {
 	if err := checkCanceled(ctx); err != nil {
 		return false, err
@@ -201,10 +293,13 @@ func (e *AgentEngine) runTurn(
 
 	var currThinkingContent string
 	if e.thinkMode {
+		start := time.Now()
 		thinkGen, err := e.think(ctx, e.buildRequestHistory(systemMessage, sess), reporter)
 		if err != nil {
 			return false, err
 		}
+		// 慢思考是真实的计费调用，与其他补全同一口径计时上报。
+		cfg.observe(thinkGen.Usage, PhaseThink, time.Since(start))
 		// 用真实消耗刷新水位线并校准估算系数。
 		sess.compactor.Observe(thinkGen.Usage.PromptTokens)
 		if thinkGen.Message.Content != "" {
@@ -212,10 +307,12 @@ func (e *AgentEngine) runTurn(
 		}
 	}
 
+	actStart := time.Now()
 	actGen, err := e.act(ctx, e.buildRequestHistory(systemMessage, sess), reporter)
 	if err != nil {
 		return false, err
 	}
+	cfg.observe(actGen.Usage, PhaseAct, time.Since(actStart))
 	sess.compactor.Observe(actGen.Usage.PromptTokens)
 
 	// 合并为单条 Assistant Message。

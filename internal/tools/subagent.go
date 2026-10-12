@@ -11,9 +11,11 @@ import (
 )
 
 // SubReporter 定义了 SubAgent 运行过程中向上层上报进度的规范。
-// 方法签名必须与 engine.Reporter 的同名方法完全一致:
-// Go 的结构化类型匹配按签名逐个比对，任何偏差都会让 engine.Reporter
-// 失去对本接口的隐式满足，循环引用的解法即告失效。
+//
+// 增加 SubReporter 是解决直接引用 engine.Reporter 会导致循环引用 ( tools ↔ engine)。
+//
+// SubReporter 方法签名必须与 engine.Reporter 的同名方法完全一致:
+// Go 的结构化类型匹配按签名逐个比对，任何偏差都会让 engine.Reporter 失去对本接口的隐式满足。
 type SubReporter interface {
 	// OnToolCall 当 SubAgent 执行工具调用时，调用该方法。
 	OnToolCall(ctx context.Context, toolName, args string) error
@@ -26,7 +28,8 @@ type SubReporter interface {
 }
 
 // SubAgentSpec 定义一个 SubAgent 角色的完整规格 ( 纯数据 )。
-// 一个角色 = 一份 spec: 角色标识、面向模型的描述、System Prompt、轮次预算与专属工具集。
+// 一个角色 = 一份 spec:
+// 角色标识、面向模型的描述、System Prompt、轮次预算与专属工具集。
 // 新增角色只需在装配层追加一份 spec，无需触碰接口与引擎。
 type SubAgentSpec struct {
 	// Name 角色唯一标识，作为 spawn_subagent 的 role 参数合法值。

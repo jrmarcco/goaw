@@ -11,6 +11,7 @@ import (
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
+	"github.com/jrmarcco/jit/xbean/option"
 )
 
 var _ tools.AgentRunner = (*SubAgentRunner)(nil)
@@ -28,6 +29,10 @@ type SubAgentRunner struct {
 	provider  provider.LLMProvider
 	thinkMode bool
 
+	// cost 进程级成本观测器，建 SubAgent 引擎时透传——
+	// SubAgent 与主 Agent 共享同一账本，token 预算是系统级口径。
+	cost CostObserver
+
 	seq atomic.Int64 // SubAgent 会话序号，保证会话 ID 唯一
 
 	// 引擎与注册表绑定 ( SkillReader 在 NewAgentEngine 中注册 )，
@@ -36,14 +41,27 @@ type SubAgentRunner struct {
 	cachedEngines map[tools.Registry]*AgentEngine
 }
 
-func NewSubAgentRunner(llmProvider provider.LLMProvider, thinkMode bool) (*SubAgentRunner, error) {
+// SubAgentRunnerWithCostObserver 为运行器挂载成本观测器。
+func SubAgentRunnerWithCostObserver(observer CostObserver) option.Opt[SubAgentRunner] {
+	return func(r *SubAgentRunner) {
+		r.cost = observer
+	}
+}
+
+func NewSubAgentRunner(
+	llmProvider provider.LLMProvider,
+	thinkMode bool,
+	opts ...option.Opt[SubAgentRunner],
+) (*SubAgentRunner, error) {
 	if llmProvider == nil {
 		return nil, fmt.Errorf("llm provider is required")
 	}
-	return &SubAgentRunner{
+	runner := &SubAgentRunner{
 		provider:  llmProvider,
 		thinkMode: thinkMode,
-	}, nil
+	}
+	option.Apply(runner, opts...)
+	return runner, nil
 }
 
 // RunSub 运行一个一次性的 SubAgent:
@@ -122,7 +140,12 @@ func (r *SubAgentRunner) engineFor(registry tools.Registry) (*AgentEngine, error
 		return eng, nil
 	}
 
-	eng, err := NewAgentEngine(r.provider, registry, r.thinkMode)
+	var engOpts []option.Opt[AgentEngine]
+	if r.cost != nil {
+		engOpts = append(engOpts, AgentEngineWithCostObserver(r.cost))
+	}
+
+	eng, err := NewAgentEngine(r.provider, registry, r.thinkMode, engOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create subagent engine: %w", err)
 	}

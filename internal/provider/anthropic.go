@@ -97,10 +97,13 @@ func (p *AnthropicProvider) Generate(ctx context.Context, msgs []schema.Message,
 	}
 
 	// Anthropic 的 input_tokens 只计未命中缓存的部分，
-	// 上下文窗口的真实占用量必须把缓存创建与缓存读取一并加总。
+	// 上下文窗口的真实占用量必须把缓存创建与缓存读取一并加总;
+	// 缓存两维同时单独透传，供成本记账按计费档位留痕 ( 见 schema.Usage )。
 	res.Usage = schema.Usage{
-		PromptTokens:     int(resp.Usage.InputTokens + resp.Usage.CacheCreationInputTokens + resp.Usage.CacheReadInputTokens),
-		CompletionTokens: int(resp.Usage.OutputTokens),
+		PromptTokens:        int(resp.Usage.InputTokens + resp.Usage.CacheCreationInputTokens + resp.Usage.CacheReadInputTokens),
+		CompletionTokens:    int(resp.Usage.OutputTokens),
+		CacheReadTokens:     int(resp.Usage.CacheReadInputTokens),
+		CacheCreationTokens: int(resp.Usage.CacheCreationInputTokens),
 	}
 
 	return res, nil

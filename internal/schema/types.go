@@ -50,8 +50,15 @@ type ToolCallResult struct {
 // 各大模型 API 都会在 Response 的 Usage 字段中回传该数据，比本地字符估算精确得多。
 // 尤其是本地根本统计不到的隐性消耗，如 System Prompt、工具定义的 Schema 等都会被计入 PromptTokens。
 type Usage struct {
-	PromptTokens     int // 本次请求消耗的提示词 Token 总数。
-	CompletionTokens int // 本次请求生成的补全 Token 数。
+	// PromptTokens 本次请求消耗的提示词 Token 总数 ( 上下文窗口占用口径，已含缓存维度 )。
+	PromptTokens int
+	// CompletionTokens 本次请求生成的补全 Token 数。
+	CompletionTokens int
+
+	// 以下两者是 PromptTokens 的子集维度，仅供成本记账留痕
+	// ( 缓存读/写在各家计费中是独立折扣/加价档，对账与未来加权计费依赖它们 ):
+	CacheReadTokens     int // 缓存命中部分 ( 计费折扣档 )。
+	CacheCreationTokens int // 缓存写入部分 ( 计费加价档 )。
 }
 
 // Generation 是一次模型生成的完整结果: 消息本体 + 真实 Token 消耗。
