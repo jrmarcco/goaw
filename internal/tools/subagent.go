@@ -89,7 +89,9 @@ type SubagentTool struct {
 
 // NewSubagentTool 创建 SubagentTool。
 // specs 至少包含一个角色规格，角色名称唯一且必须绑定非空注册表。
-// reporter 允许为 nil: 引擎运行时会经由 context 注入当次运行的 Reporter，
+//
+// reporter 允许为 nil:
+// 引擎运行时会经由 context 注入当次运行的 Reporter，
 // 构造期传入的 reporter 仅作为脱离引擎运行 ( 如测试 ) 时的兜底。
 func NewSubagentTool(runner AgentRunner, specs []SubAgentSpec, reporter SubReporter) (*SubagentTool, error) {
 	if runner == nil {
