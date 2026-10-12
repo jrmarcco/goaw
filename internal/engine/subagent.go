@@ -3,9 +3,11 @@ package engine
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 
+	icontext "github.com/jrmarcco/goaw/internal/context"
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
@@ -13,25 +15,25 @@ import (
 
 var _ tools.AgentRunner = (*SubAgentRunner)(nil)
 
-// 编译期断言: engine.Reporter 必须隐式满足 tools.SubReporter。
-// 这是循环引用解法成立的前提 —— 一旦有人改动 Reporter 的方法签名，
-// 该断言立即编译失败，提醒同步维护 tools.SubReporter。
-var _ tools.SubReporter = Reporter(nil)
+// defaultSubAgentMaxTurns SubAgent 轮次预算缺省值。
+// SubAgent 是父运行同步等待的一次性委派，必须兜住 "一直成功地探索" 的失控场景
+// ( ReminderInjector 只拦截连续失败的工具调用死循环 )。
+const defaultSubAgentMaxTurns = 30
 
 // SubAgentRunner 是 tools.AgentRunner 的 engine 侧实现，以 AgentEngine 为执行内核。
-// 接口定义在消费方 tools 包、实现在本包，依赖方向保持 engine → tools，
-// 两个包之间不再存在反向 import。
+// 接口定义在消费方 tools 包、实现在本包，依赖方向保持 engine → tools。
 type SubAgentRunner struct {
+	mu sync.Mutex
+
 	provider  provider.LLMProvider
 	thinkMode bool
 
 	seq atomic.Int64 // SubAgent 会话序号，保证会话 ID 唯一
 
 	// 引擎与注册表绑定 ( SkillReader 在 NewAgentEngine 中注册 )，
-	// 同一注册表重复建引擎会重复触发覆盖告警，这里按注册表身份缓存复用。
-	mu             sync.Mutex
-	cachedEng      *AgentEngine
-	cachedRegistry tools.Registry
+	// 同一注册表重复建引擎会重复触发覆盖告警，这里按注册表身份缓存复用；
+	// 多角色 ( 多注册表 ) 并存时各自持有独立引擎。
+	cachedEngines map[tools.Registry]*AgentEngine
 }
 
 func NewSubAgentRunner(llmProvider provider.LLMProvider, thinkMode bool) (*SubAgentRunner, error) {
@@ -46,15 +48,16 @@ func NewSubAgentRunner(llmProvider provider.LLMProvider, thinkMode bool) (*SubAg
 
 // RunSub 运行一个一次性的 SubAgent:
 // 工作区继承自父运行 ( 从 context 解析 )，上下文历史独立 ( 全新 Session )，
+// System Prompt 与轮次预算来自角色规格 ( SubAgentSpec )，
 // 正常结束后返回 SubAgent 的最终结论。
 func (r *SubAgentRunner) RunSub(
 	ctx context.Context,
+	spec tools.SubAgentSpec,
 	prompt string,
-	registry tools.Registry,
 	reporter tools.SubReporter,
 ) (string, error) {
-	if registry == nil {
-		return "", fmt.Errorf("subagent tool registry is required")
+	if spec.Registry == nil {
+		return "", fmt.Errorf("subagent spec registry is required")
 	}
 
 	workspace, err := tools.WorkspaceFromContext(ctx)
@@ -62,7 +65,7 @@ func (r *SubAgentRunner) RunSub(
 		return "", fmt.Errorf("failed to resolve workspace for subagent: %w", err)
 	}
 
-	eng, err := r.engineFor(registry)
+	eng, err := r.engineFor(spec.Registry)
 	if err != nil {
 		return "", err
 	}
@@ -71,13 +74,43 @@ func (r *SubAgentRunner) RunSub(
 	sess := NewSession(fmt.Sprintf("subagent-%d", r.seq.Add(1)), workspace, false)
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
-	if err := eng.Run(ctx, sess, subReporter); err != nil {
+	if err := eng.Run(ctx, sess, subReporter, subRunOptions(spec)...); err != nil {
 		return "", fmt.Errorf("subagent run failed: %w", err)
 	}
-	if !subReporter.hasFinal {
+	return subConclusion(sess)
+}
+
+// subRunOptions 把角色规格映射为引擎运行选项。
+func subRunOptions(spec tools.SubAgentSpec) []RunOption {
+	maxTurns := spec.MaxTurns
+	if maxTurns <= 0 {
+		maxTurns = defaultSubAgentMaxTurns
+	}
+
+	composeRole := func(workspace string) (schema.Message, error) {
+		// SystemPrompt 为空时回退主 Agent 的默认组装。
+		if strings.TrimSpace(spec.SystemPrompt) == "" {
+			return icontext.NewPromptComposer(workspace, false).Build()
+		}
+		return icontext.NewPromptComposer(workspace, false, icontext.WithRoleCore(spec.SystemPrompt)).Build()
+	}
+
+	return []RunOption{
+		WithSystemComposer(composeRole),
+		WithMaxTurns(maxTurns),
+	}
+}
+
+// subConclusion 从会话提取最终结论。
+// 正常结束 ( 含强制收尾 ) 时最后一条消息是无工具调用的 Assistant 文本；
+// 结构性排除了 "中间轮次的闲聊文本被当作汇报" 的情况
+// ( 引擎每次 act 产生文本都会回调 OnMessage，不区分是否伴随工具调用 )。
+func subConclusion(sess *Session) (string, error) {
+	last := sess.Last()
+	if last.Role != schema.RoleAssistant || len(last.ToolCalls) != 0 || strings.TrimSpace(last.Content) == "" {
 		return "", fmt.Errorf("subagent finished without a final message")
 	}
-	return subReporter.final, nil
+	return last.Content, nil
 }
 
 // engineFor 返回与给定注册表绑定的引擎，同一注册表 ( 指针相同 ) 时复用缓存。
@@ -85,8 +118,8 @@ func (r *SubAgentRunner) engineFor(registry tools.Registry) (*AgentEngine, error
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.cachedEng != nil && r.cachedRegistry == registry {
-		return r.cachedEng, nil
+	if eng, ok := r.cachedEngines[registry]; ok {
+		return eng, nil
 	}
 
 	eng, err := NewAgentEngine(r.provider, registry, r.thinkMode)
@@ -94,19 +127,20 @@ func (r *SubAgentRunner) engineFor(registry tools.Registry) (*AgentEngine, error
 		return nil, fmt.Errorf("failed to create subagent engine: %w", err)
 	}
 
-	r.cachedEng, r.cachedRegistry = eng, registry
+	if r.cachedEngines == nil {
+		r.cachedEngines = make(map[tools.Registry]*AgentEngine)
+	}
+	r.cachedEngines[registry] = eng
 	return eng, nil
 }
 
+var _ tools.SubReporter = Reporter(nil)
+
 // subRunReporter 把 tools.SubReporter 桥接为 engine.Reporter，
-// 同时收集最终结论: 引擎每次 act 产生文本都会回调 OnMessage，
-// Run 正常返回后最后一次回调的内容即 SubAgent 的结论。
-// 引擎不共享父会话历史，中间文本与最终结论都经由 downstream 透传给上层。
+// 引擎不共享父会话历史，中间文本与工具事件都经由 downstream 透传给上层；
+// 最终结论不经此处收集，由 RunSub 从会话最后一条消息结构性提取 ( 见 subConclusion )。
 type subRunReporter struct {
 	downstream tools.SubReporter
-
-	hasFinal bool
-	final    string
 }
 
 // OnThinking 子代理的内部思考不上报。
@@ -130,8 +164,6 @@ func (r *subRunReporter) OnToolCallResult(ctx context.Context, toolName, result 
 }
 
 func (r *subRunReporter) OnMessage(ctx context.Context, content string) error {
-	r.hasFinal = true
-	r.final = content
 	if r.downstream != nil {
 		return r.downstream.OnMessage(ctx, content)
 	}

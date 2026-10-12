@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	icontext "github.com/jrmarcco/goaw/internal/context"
 	"github.com/jrmarcco/goaw/internal/engine"
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/reporter"
@@ -74,16 +75,32 @@ func main() {
 		log.Fatalf("创建 Agent 引擎失败: %v", err)
 	}
 
-	// Multi-Agent: SubAgent 使用独立的只读注册表 ( 不含 spawn_subagent，天然无递归 )，
-	// 引擎在主引擎构造完成后注册，解决 "runner 依赖引擎、引擎依赖注册表" 的对象级循环。
+	// Multi-Agent: SubAgent 按角色规格 ( SubAgentSpec ) 装配，角色决定 System Prompt 与工具集。
+	// Explorer 是只读信息收集角色: 注册表不含 spawn_subagent ( 天然无递归 )，
+	// bash 经白名单中间件硬性约束为只读，不挂审核中间件 ( 只读由构造保证，审核留给主 Agent 的写路径 )。
 	subRegistry := tools.NewDefaultRegistry(
 		tools.NewFileReader(),
+		tools.NewBashExecutor(),
 	)
+	subRegistry.Use(tools.NewReadOnlyBashMiddleware())
+
 	subRunner, err := engine.NewSubAgentRunner(llmProvider, false)
 	if err != nil {
 		log.Fatalf("创建 SubAgent 运行器失败: %v", err)
 	}
-	subagentTool, err := tools.NewSubagentTool(subRunner, subRegistry, nil)
+
+	// explorerMaxTurns Explorer 角色的轮次预算。
+	const explorerMaxTurns = 30
+
+	explorerSpec := tools.SubAgentSpec{
+		Name:         "explorer",
+		Description:  "只读信息收集专员，在当前工作区内检索代码、日志与配置，返回带证据出处的调研结论。适用于检索、调研与总结，不适用于需要修改文件的任务。",
+		SystemPrompt: icontext.ExplorerRolePrompt,
+		MaxTurns:     explorerMaxTurns,
+		Registry:     subRegistry,
+	}
+
+	subagentTool, err := tools.NewSubagentTool(subRunner, []tools.SubAgentSpec{explorerSpec}, nil)
 	if err != nil {
 		log.Fatalf("创建 SubAgent 工具失败: %v", err)
 	}

@@ -6,6 +6,7 @@ const (
 	KeyProperties  = "properties"
 	KeyRequired    = "required"
 	KeyDescription = "description"
+	KeyEnum        = "enum"
 )
 
 // ToolDef.InputSchema ( JSON Schema ) 中的数据类型。

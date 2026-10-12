@@ -40,8 +40,11 @@ func NewBashExecutor(opts ...option.Opt[BashExecutor]) *BashExecutor {
 	return bashExecutor
 }
 
+// bashToolName bash 工具的全局唯一名称 ( 只读中间件按它识别 bash 调用 )。
+const bashToolName = "bash"
+
 func (e *BashExecutor) Name() string {
-	return "bash"
+	return bashToolName
 }
 
 func (e *BashExecutor) Definition() schema.ToolDefinition {

@@ -41,6 +41,13 @@ func (p *scriptedProvider) Generate(
 	return gen, nil
 }
 
+// callsCount 返回并发安全的历史调用次数。
+func (p *scriptedProvider) callsCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
 // subFakeTool 固定输出的测试替身工具。
 type subFakeTool struct {
 	calls int
@@ -86,7 +93,7 @@ func (r *recordingSubReporter) OnMessage(_ context.Context, content string) erro
 	return nil
 }
 
-// subWorkspace 创建带 AGENTS.md 的临时工作区 ( PromptComposer 的硬依赖 )。
+// subWorkspace 创建带 AGENTS.md 的临时工作区 ( 主模式组装的硬依赖 )。
 func subWorkspace(t *testing.T) string {
 	t.Helper()
 
@@ -97,11 +104,23 @@ func subWorkspace(t *testing.T) string {
 	return workspace
 }
 
+// explorerSpec 构造绑定指定注册表与角色提示词的测试规格。
+func explorerSpec(systemPrompt string, maxTurns int, registry tools.Registry) tools.SubAgentSpec {
+	return tools.SubAgentSpec{
+		Name:         "explorer",
+		Description:  "只读信息收集专员",
+		SystemPrompt: systemPrompt,
+		MaxTurns:     maxTurns,
+		Registry:     registry,
+	}
+}
+
 func TestSubAgentRunnerRunSub(t *testing.T) {
 	t.Parallel()
 
 	// subFinalConclusion SubAgent 的预期最终结论。
 	const subFinalConclusion = "最终结论"
+	const roleCore = "你是测试 Explorer，只读信息收集专员。"
 
 	fake := &subFakeTool{}
 	llm := &scriptedProvider{gens: []*schema.Generation{
@@ -121,11 +140,11 @@ func TestSubAgentRunnerRunSub(t *testing.T) {
 		t.Fatalf("NewSubAgentRunner() error = %v", err)
 	}
 
-	registry := tools.NewDefaultRegistry(fake)
 	reporter := &recordingSubReporter{}
+	spec := explorerSpec(roleCore, 0, tools.NewDefaultRegistry(fake))
 
 	ctx := tools.WithWorkspace(context.Background(), subWorkspace(t))
-	conclusion, err := runner.RunSub(ctx, "调研依赖", registry, reporter)
+	conclusion, err := runner.RunSub(ctx, spec, "调研依赖", reporter)
 	if err != nil {
 		t.Fatalf("RunSub() error = %v", err)
 	}
@@ -146,10 +165,105 @@ func TestSubAgentRunnerRunSub(t *testing.T) {
 		t.Fatalf("OnMessage events = %v, want [%s]", reporter.messages, subFinalConclusion)
 	}
 
-	// 请求历史 = System Prompt + 会话工作记忆，prompt 必须紧跟其后作为开场用户消息。
-	if len(llm.lastMsgs) < 2 || llm.lastMsgs[1].Role != schema.RoleUser ||
-		llm.lastMsgs[1].Content != "调研依赖" {
+	// 请求历史 = 角色化 System Prompt + 会话工作记忆:
+	// role core 替换通用身份、AGENTS.md 保留注入、prompt 紧随其后作为开场用户消息。
+	if len(llm.lastMsgs) < 2 {
+		t.Fatalf("request history too short: %d messages", len(llm.lastMsgs))
+	}
+	sysMsg := llm.lastMsgs[0]
+	if sysMsg.Role != schema.RoleSystem {
+		t.Fatalf("first message role = %q, want system", sysMsg.Role)
+	}
+	if !strings.Contains(sysMsg.Content, roleCore) {
+		t.Fatalf("system message should embed the role core")
+	}
+	if !strings.Contains(sysMsg.Content, "# 测试工作区") {
+		t.Fatalf("system message should embed AGENTS.md content")
+	}
+	if strings.Contains(sysMsg.Content, "Goaw") {
+		t.Fatalf("role core should replace the generic identity")
+	}
+	if llm.lastMsgs[1].Role != schema.RoleUser || llm.lastMsgs[1].Content != "调研依赖" {
 		t.Fatalf("request history = %+v, want the opening user prompt after the system message", llm.lastMsgs)
+	}
+}
+
+func TestSubAgentRunnerRunSubDefaultComposer(t *testing.T) {
+	t.Parallel()
+
+	// SystemPrompt 为空时回退主 Agent 默认组装 ( 通用身份 + AGENTS.md )。
+	llm := &scriptedProvider{gens: []*schema.Generation{
+		{Message: schema.Message{Role: schema.RoleAssistant, Content: "结论"}},
+	}}
+
+	runner, err := NewSubAgentRunner(llm, false)
+	if err != nil {
+		t.Fatalf("NewSubAgentRunner() error = %v", err)
+	}
+
+	spec := explorerSpec("", 0, tools.NewDefaultRegistry())
+	ctx := tools.WithWorkspace(context.Background(), subWorkspace(t))
+	if _, err = runner.RunSub(ctx, spec, "task", nil); err != nil {
+		t.Fatalf("RunSub() error = %v", err)
+	}
+
+	sysMsg := llm.lastMsgs[0]
+	if sysMsg.Role != schema.RoleSystem || !strings.Contains(sysMsg.Content, "Goaw") {
+		t.Fatalf("system message = %+v, want the default composition", sysMsg)
+	}
+}
+
+func TestSubAgentRunnerRunSubForcedFinal(t *testing.T) {
+	t.Parallel()
+
+	// subForcedConclusion 轮次预算耗尽后强制收尾的预期汇报。
+	const subForcedConclusion = "预算耗尽后的收尾汇报"
+
+	fake := &subFakeTool{}
+	llm := &scriptedProvider{gens: []*schema.Generation{
+		// 第一轮: 请求工具调用 ( MaxTurns=1，下一轮即耗尽 )。
+		{Message: schema.Message{
+			Role: schema.RoleAssistant,
+			ToolCalls: []schema.ToolCall{
+				{ID: testToolCallID1, Name: fake.Name(), Args: []byte(`{}`)},
+			},
+		}},
+		// 强制收尾轮: 无工具挂载，模型只能输出文本。
+		{Message: schema.Message{Role: schema.RoleAssistant, Content: subForcedConclusion}},
+	}}
+
+	runner, err := NewSubAgentRunner(llm, false)
+	if err != nil {
+		t.Fatalf("NewSubAgentRunner() error = %v", err)
+	}
+
+	spec := explorerSpec("角色身份", 1, tools.NewDefaultRegistry(fake))
+	ctx := tools.WithWorkspace(context.Background(), subWorkspace(t))
+	conclusion, err := runner.RunSub(ctx, spec, "task", nil)
+	if err != nil {
+		t.Fatalf("RunSub() error = %v", err)
+	}
+
+	if conclusion != subForcedConclusion {
+		t.Fatalf("RunSub() conclusion = %q, want the forced final report %q", conclusion, subForcedConclusion)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("subagent tool executed %d times, want 1", fake.calls)
+	}
+	if llm.callsCount() != 2 {
+		t.Fatalf("provider called %d times, want 2 (one tool turn + one forced final)", llm.callsCount())
+	}
+
+	// 强制收尾请求的历史中必须携带预算耗尽提醒。
+	hasReminder := false
+	for _, msg := range llm.lastMsgs {
+		if strings.Contains(msg.Content, "工具调用预算已耗尽") {
+			hasReminder = true
+			break
+		}
+	}
+	if !hasReminder {
+		t.Fatalf("forced final request history = %+v, want the budget-exhausted reminder", llm.lastMsgs)
 	}
 }
 
@@ -166,8 +280,9 @@ func TestSubAgentRunnerRunSubWithoutFinalMessage(t *testing.T) {
 		t.Fatalf("NewSubAgentRunner() error = %v", err)
 	}
 
+	spec := explorerSpec("角色身份", 0, tools.NewDefaultRegistry())
 	ctx := tools.WithWorkspace(context.Background(), subWorkspace(t))
-	if _, err = runner.RunSub(ctx, "task", tools.NewDefaultRegistry(), nil); err == nil {
+	if _, err = runner.RunSub(ctx, spec, "task", nil); err == nil {
 		t.Fatal("RunSub() should fail when the subagent produces no final message")
 	}
 }
@@ -181,13 +296,14 @@ func TestSubAgentRunnerRunSubMissingWorkspace(t *testing.T) {
 	}
 
 	// 缺少工作区: 子代理与父运行必须共享同一执行范围。
-	_, err = runner.RunSub(context.Background(), "task", tools.NewDefaultRegistry(), nil)
+	spec := explorerSpec("角色身份", 0, tools.NewDefaultRegistry())
+	_, err = runner.RunSub(context.Background(), spec, "task", nil)
 	if err == nil || !strings.Contains(err.Error(), "workspace") {
 		t.Fatalf("RunSub() error = %v, want a workspace error", err)
 	}
 }
 
-func TestSubAgentRunnerRunSubNilRegistry(t *testing.T) {
+func TestSubAgentRunnerRunSubNilSpecRegistry(t *testing.T) {
 	t.Parallel()
 
 	runner, err := NewSubAgentRunner(&scriptedProvider{}, false)
@@ -196,8 +312,8 @@ func TestSubAgentRunnerRunSubNilRegistry(t *testing.T) {
 	}
 
 	ctx := tools.WithWorkspace(context.Background(), t.TempDir())
-	if _, err = runner.RunSub(ctx, "task", nil, nil); err == nil {
-		t.Fatal("RunSub() should reject a nil registry")
+	if _, err = runner.RunSub(ctx, tools.SubAgentSpec{Name: "explorer"}, "task", nil); err == nil {
+		t.Fatal("RunSub() should reject a spec without registry")
 	}
 }
 

@@ -126,6 +126,18 @@ func (s *Session) GetWorkingMemory(limit int) []schema.Message {
 	return res
 }
 
+// Last 返回会话历史的最后一条消息，空历史返回零值。
+// SubAgent 结论提取依赖它读取引擎追加的最终 Assistant 消息。
+func (s *Session) Last() schema.Message {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.history) == 0 {
+		return schema.Message{}
+	}
+	return s.history[len(s.history)-1]
+}
+
 // isPlainUserMessage 判断是否为普通 User 消息。
 // ToolCallResult ( RoleUser 且含 ToolCallID ) 不算:
 // 它必须跟在对应 ToolCall 之后，不能充当合法的序列开头。

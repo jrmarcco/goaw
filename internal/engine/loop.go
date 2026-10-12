@@ -48,10 +48,61 @@ func NewAgentEngine(
 	}, nil
 }
 
+// forcedFinalReminder 轮次预算耗尽时注入的收尾指令。
+const forcedFinalReminder = "工具调用预算已耗尽。请立即停止调用工具，基于已收集的信息输出最终汇报；信息不足的部分如实说明未确认。"
+
+// RunOption 是 AgentEngine.Run 的运行级选项。
+// 选项作用于单次运行 ( 而非引擎构造 )，同一引擎可承载不同角色的运行。
+type RunOption func(*runConfig)
+
+// runConfig Run 的运行级配置，由 RunOption 填充。
+type runConfig struct {
+	// systemComposer 覆盖缺省的 System Prompt 组装，角色化 SubAgent 经由它注入身份。
+	systemComposer func(workspace string) (schema.Message, error)
+
+	// maxTurns 轮次预算，小于等于 0 表示不设限。
+	maxTurns int
+}
+
+// buildSystemMessage 组装本次运行的 System Prompt。
+func (c *runConfig) buildSystemMessage(sess *Session) (schema.Message, error) {
+	if c.systemComposer != nil {
+		return c.systemComposer(sess.Workspace)
+	}
+
+	// 缺省组装: System Prompt 每次 Run 现场构建，不写入会话历史，
+	// 确保 AGENTS.md 与技能索引始终反映工作区的最新状态。
+	systemMessage, err := icontext.NewPromptComposer(sess.Workspace, sess.PlanMode).Build()
+	if err != nil {
+		return schema.Message{}, fmt.Errorf("failed to build system message: %w", err)
+	}
+	return systemMessage, nil
+}
+
+// exhausted 判定轮次预算是否耗尽。
+func (c *runConfig) exhausted(turn int) bool {
+	return c.maxTurns > 0 && turn > c.maxTurns
+}
+
+// WithSystemComposer 以自定义组装器替换缺省的 PromptComposer。
+func WithSystemComposer(composer func(workspace string) (schema.Message, error)) RunOption {
+	return func(cfg *runConfig) {
+		cfg.systemComposer = composer
+	}
+}
+
+// WithMaxTurns 设置轮次预算；耗尽后引擎剥夺工具挂载强制收尾 ( 见 forceFinalTurn )。
+func WithMaxTurns(maxTurns int) RunOption {
+	return func(cfg *runConfig) {
+		cfg.maxTurns = maxTurns
+	}
+}
+
 // Run 在指定会话上执行一次 Agent 运行。
 // 会话承载运行所需的全部环境与状态: Workspace 决定工具的执行范围和
 // System Prompt 的内容，history 跨 Run 持久累积，同会话的多次运行共享上下文。
-func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter) error {
+// opts 为本次运行的可选配置 ( 角色化 System Prompt、轮次预算等 )。
+func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter, opts ...RunOption) error {
 	if err := checkCanceled(ctx); err != nil {
 		return err
 	}
@@ -66,6 +117,11 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter)
 	}
 	defer sess.EndRun()
 
+	var cfg runConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	// 死循环检测的失败计数语义是 "连续轮次"，不跨 Run:
 	// 新一次运行代表新的任务上下文，残留计数会让 "连续" 措辞失真。
 	sess.injector.Reset()
@@ -78,14 +134,15 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter)
 	slog.Info("[engine] Agent 引擎启动", "session", sess.ID, "workspace", sess.Workspace)
 	slog.Info("[engine] 慢思考模式", "enabled", e.thinkMode)
 
-	// System Prompt 每次 Run 现场构建，不写入会话历史，
-	// 确保 AGENTS.md 与技能索引始终反映工作区的最新状态。
-	systemMessage, err := icontext.NewPromptComposer(sess.Workspace, sess.PlanMode).Build()
+	systemMessage, err := cfg.buildSystemMessage(sess)
 	if err != nil {
-		return fmt.Errorf("failed to build system message: %w", err)
+		return err
 	}
 
 	for turn := 1; ; turn++ {
+		if cfg.exhausted(turn) {
+			return e.forceFinalTurn(ctx, sess, systemMessage, reporter)
+		}
 		done, err := e.runTurn(ctx, sess, systemMessage, reporter, turn)
 		if err != nil {
 			return err
@@ -94,6 +151,40 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter)
 			return nil
 		}
 	}
+}
+
+// forceFinalTurn 轮次预算耗尽后的强制收尾。
+// 注入预算耗尽提醒后剥夺工具挂载再请求一次补全——无工具时模型结构性只能输出文本，
+// 已收集的信息得以保留为最终汇报，而非随硬报错整体作废。
+// 收尾输出为空时由调用方 ( 如 RunSub 的结论校验 ) 兜底报错。
+func (e *AgentEngine) forceFinalTurn(
+	ctx context.Context,
+	sess *Session,
+	systemMessage schema.Message,
+	reporter Reporter,
+) error {
+	if err := checkCanceled(ctx); err != nil {
+		return err
+	}
+
+	slog.Warn("[engine] 轮次预算耗尽，剥夺工具挂载，强制收尾汇报")
+
+	sess.Append(schema.Message{
+		Role:    schema.RoleUser,
+		Content: forcedFinalReminder,
+	})
+
+	finalGen, err := e.provider.Generate(ctx, e.buildRequestHistory(systemMessage, sess), nil)
+	if err != nil {
+		return fmt.Errorf("failed to generate forced final response: %w", err)
+	}
+
+	content := strings.TrimSpace(finalGen.Message.Content)
+	sess.Append(schema.Message{Role: schema.RoleAssistant, Content: content})
+	if content != "" && reporter != nil {
+		_ = reporter.OnMessage(ctx, content)
+	}
+	return nil
 }
 
 func (e *AgentEngine) runTurn(
