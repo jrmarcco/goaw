@@ -69,7 +69,8 @@ func (c *PromptComposer) Build() (schema.Message, error) {
 	// 2. 项目专属规范 ( AGENTS.md )，角色模式下文件缺失时为空内容、跳过注入。
 	writeAgentsMD(&builder, agentsMD)
 
-	// 3. 技能索引 ( 仅主模式 )；正文由 skill_reader 在需要时按需读取。
+	// 3. 技能索引 ( 仅主模式 )；
+	// 正文由 skill_reader 在需要时按需读取。
 	// 角色化 SubAgent 不注入: 技能索引面向任务执行视角，与角色纪律无关。
 	if c.roleCore == "" {
 		skills, err := c.skillLoader.List()
@@ -86,8 +87,10 @@ func (c *PromptComposer) Build() (schema.Message, error) {
 }
 
 // readAgentsMD 读取工作区的 AGENTS.md。
-// 角色模式下文件缺失时返回空内容: SubAgent 运行在继承的任意工作区，
-// 不应因缺少项目规范文件而失败；主模式下维持硬报错。
+//
+// 角色模式下文件缺失时返回空内容:
+// SubAgent 运行在继承的任意工作区，不应因缺少项目规范文件而失败。
+// 主模式下维持硬报错。
 func (c *PromptComposer) readAgentsMD() ([]byte, error) {
 	root, err := os.OpenRoot(c.workspace)
 	if err != nil {
@@ -122,7 +125,7 @@ func (c *PromptComposer) writeIdentity(builder *strings.Builder) {
 		return
 	}
 
-	// 极简内核 ( Minimal Core): 确立基本身份与最底线的纪律。
+	// 极简内核 ( Minimal Core ): 确立基本身份与最底线的纪律。
 	builder.WriteString(corePrompt)
 	if c.planMode {
 		builder.WriteString(planModePrompt)

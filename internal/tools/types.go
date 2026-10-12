@@ -42,6 +42,6 @@ type Tool interface {
 
 	// Execute 执行工具并返回结果 ( 参数由模型传入 )。
 	// 注意：
-	//	参数是 json.RawMessage，反序列化工作用具具体实现决定。
+	// 参数是 json.RawMessage，反序列化工作用具具体实现决定。
 	Execute(ctx context.Context, args json.RawMessage) (string, error)
 }

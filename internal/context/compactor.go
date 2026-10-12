@@ -146,14 +146,12 @@ func (c *Compactor) Compact(msgs []schema.Message) []schema.Message {
 // Observe 消费一次真实 API 响应的 Usage.PromptTokens。
 //
 // 这是整个自适应机制的反馈回路:
-//
-//	刷新水位线，并用 ( 真实 token 消耗 / 最近放行的字符量 ) 校准换算系数。
-//	每次模型调用返回后都必须调用。
+// 刷新水位线，并用 ( 真实 token 消耗 / 最近放行的字符量 ) 校准换算系数。
+// 每次模型调用返回后都必须调用。
 //
 // 说明:
-//
-//	act 请求的工具定义开销会被一并计入样本，使系数略微偏高，
-//	这符合 "宁可高估也不能低估" 的原则，EWMA 会自动抹平该系统性偏差。
+// act 请求的工具定义开销会被一并计入样本，使系数略微偏高，
+// 这符合 "宁可高估也不能低估" 的原则，EWMA 会自动抹平该系统性偏差。
 func (c *Compactor) Observe(promptTokens int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
