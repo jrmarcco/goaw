@@ -3,12 +3,12 @@ module github.com/jrmarcco/goaw
 go 1.27
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.79.1
+	github.com/anthropics/anthropic-sdk-go v1.80.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/jrmarcco/jit v0.0.8
-	github.com/larksuite/oapi-sdk-go/v3 v3.12.0
-	github.com/openai/openai-go/v3 v3.74.0
-	golang.org/x/sync v0.23.0
+	github.com/larksuite/oapi-sdk-go/v3 v3.12.1
+	github.com/openai/openai-go/v3 v3.77.0
+	golang.org/x/sync v0.24.0
 )
 
 require (
