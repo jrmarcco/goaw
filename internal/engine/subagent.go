@@ -118,7 +118,7 @@ func (r *SubAgentRunner) RunSub(
 }
 
 // subRunOptions 把角色规格映射为引擎运行选项。
-func subRunOptions(spec tools.SubAgentSpec) []RunOption {
+func subRunOptions(spec tools.SubAgentSpec) []RunOpt {
 	maxTurns := spec.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = defaultSubAgentMaxTurns
@@ -132,7 +132,7 @@ func subRunOptions(spec tools.SubAgentSpec) []RunOption {
 		return icontext.NewPromptComposer(workspace, false, icontext.WithRoleCore(spec.SystemPrompt)).Build()
 	}
 
-	return []RunOption{
+	return []RunOpt{
 		WithSystemComposer(composeRole),
 		WithMaxTurns(maxTurns),
 		// 子任务树根携带角色标识，与父树的 subagent.session 属性互链。

@@ -54,9 +54,9 @@ const forcedFinalTurnsReminder = "工具调用预算已耗尽。请立即停止�
 //nolint:gosec // G101 误报: 提示词文案包含 "Token" 字样被误判为硬编码凭证，并非密钥。
 const forcedFinalTokensReminder = "Token 预算已耗尽。请立即停止调用工具，基于已收集的信息输出最终汇报；信息不足的部分如实说明未确认。"
 
-// RunOption 是 AgentEngine.Run 的运行级选项。
+// RunOpt 是 AgentEngine.Run 的运行级选项 ( 基于 option.Opt )。
 // 选项作用于单次运行 ( 而非引擎构造 )，同一引擎可承载不同角色的运行。
-type RunOption func(*runConfig)
+type RunOpt = option.Opt[runConfig]
 
 // runConfig Run 的运行级配置，由 RunOption 填充。
 type runConfig struct {
@@ -121,14 +121,14 @@ func (c *runConfig) forcedReminder(turn int) (string, bool) {
 }
 
 // WithSystemComposer 以自定义组装器替换缺省的 PromptComposer。
-func WithSystemComposer(composer func(workspace string) (schema.Message, error)) RunOption {
+func WithSystemComposer(composer func(workspace string) (schema.Message, error)) RunOpt {
 	return func(cfg *runConfig) {
 		cfg.systemComposer = composer
 	}
 }
 
 // WithMaxTurns 设置轮次预算；耗尽后引擎剥夺工具挂载强制收尾 ( 见 forceFinalTurn )。
-func WithMaxTurns(maxTurns int) RunOption {
+func WithMaxTurns(maxTurns int) RunOpt {
 	return func(cfg *runConfig) {
 		cfg.maxTurns = maxTurns
 	}
@@ -136,7 +136,7 @@ func WithMaxTurns(maxTurns int) RunOption {
 
 // WithRootSpanAttributes 为本次运行的追踪根 Span 附加属性
 // ( 角色化 SubAgent 的 role 标识经此进入子任务树根 )。
-func WithRootSpanAttributes(attrs map[string]any) RunOption {
+func WithRootSpanAttributes(attrs map[string]any) RunOpt {
 	return func(cfg *runConfig) {
 		cfg.traceRootAttrs = attrs
 	}
@@ -208,7 +208,7 @@ func AgentEngineWithTraceExporter(exporter obs.Exporter) option.Opt[AgentEngine]
 // Workspace 决定工具的执行范围和 System Prompt 的内容，
 // history 跨 Run 持久累积，同会话的多次运行共享上下文。
 // opts 为本次运行的可选配置 ( 角色化 System Prompt、轮次预算等 )。
-func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter, opts ...RunOption) (err error) {
+func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter, opts ...RunOpt) (err error) {
 	if cancelErr := checkCanceled(ctx); cancelErr != nil {
 		return cancelErr
 	}
@@ -224,9 +224,7 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter,
 	defer sess.EndRun()
 
 	var cfg runConfig
-	for _, opt := range opts {
-		opt(&cfg)
-	}
+	option.Apply(&cfg, opts...)
 	cfg.cost = e.cost
 
 	// 死循环检测的失败计数语义是 "连续轮次"，不跨 Run:

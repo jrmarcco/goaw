@@ -7,6 +7,8 @@ import (
 
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/jrmarcco/goaw/internal/option"
 )
 
 // SpanKind 是跨度的种类标记 ( 映射到 OTel 的 SpanKind，见 otelSpanKind )。
@@ -21,15 +23,15 @@ const (
 	SpanKindClient SpanKind = "client"
 )
 
-// SpanOption 是创建 Span 的可选项。
-type SpanOption func(*spanOptions)
+// SpanOpt 是创建 Span 的可选项 ( 基于 option.Opt，底层配置结构不导出 )。
+type SpanOpt = option.Opt[spanOptions]
 
 type spanOptions struct {
 	kind SpanKind
 }
 
 // WithSpanKind 标记跨度种类 ( 缺省 SpanKindInternal )。
-func WithSpanKind(kind SpanKind) SpanOption {
+func WithSpanKind(kind SpanKind) SpanOpt {
 	return func(opts *spanOptions) {
 		opts.kind = kind
 	}
@@ -71,11 +73,9 @@ type Span struct {
 }
 
 // newSpan 构造一个已计时的空跨度。
-func newSpan(name string, opts ...SpanOption) *Span {
+func newSpan(name string, opts ...SpanOpt) *Span {
 	options := spanOptions{kind: SpanKindInternal}
-	for _, opt := range opts {
-		opt(&options)
-	}
+	option.Apply(&options, opts...)
 
 	return &Span{
 		Name:       name,
@@ -89,7 +89,7 @@ func newSpan(name string, opts ...SpanOption) *Span {
 // 自研侧不挂接任何父节点，OTel 侧以新 Trace 开根，
 // 并以 Link 指向 ctx 中残留的父 SpanContext ( 如子代理委派场景 )，
 // 保持 "关联但不父子" 的独立任务树语义。
-func StartRootSpan(ctx context.Context, name string, opts ...SpanOption) (context.Context, *Span) {
+func StartRootSpan(ctx context.Context, name string, opts ...SpanOpt) (context.Context, *Span) {
 	span := newSpan(name, opts...)
 
 	startOpts := []trace.SpanStartOption{
@@ -108,7 +108,7 @@ func StartRootSpan(ctx context.Context, name string, opts ...SpanOption) (contex
 
 // StartSpan 开启一个新的追踪跨度，并级联到 Context 中:
 // 自研侧挂接到当前父 Span，OTel 侧经 SpanContext 自动继承父子。
-func StartSpan(ctx context.Context, name string, opts ...SpanOption) (context.Context, *Span) {
+func StartSpan(ctx context.Context, name string, opts ...SpanOpt) (context.Context, *Span) {
 	span := newSpan(name, opts...)
 
 	// 尝试获取父 Span。
