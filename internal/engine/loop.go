@@ -15,55 +15,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// AgentEngine 是与工作区无关的 Agent 执行引擎。
-// 单次运行的全部环境 ( 工作区路径 ) 来自 Session，
-// 经由 context 流向 System Prompt 构建与所有工具调用。
-type AgentEngine struct {
-	provider provider.LLMProvider
-	registry tools.Registry
-
-	thinkMode bool
-
-	// cost 进程级成本观测器 ( 系统级策略，构造期注入 )，
-	// 终端与飞书等入口共用同一引擎实例时天然全覆盖。
-	cost CostObserver
-
-	recovery *icontext.RecoveryManager
-}
-
-func NewAgentEngine(
-	llmProvider provider.LLMProvider,
-	toolRegistry tools.Registry,
-	thinkMode bool,
-	opts ...option.Opt[AgentEngine],
-) (*AgentEngine, error) {
-	if toolRegistry == nil {
-		return nil, fmt.Errorf("tool registry is required")
-	}
-
-	if err := toolRegistry.Register(tools.NewSkillReader()); err != nil {
-		return nil, fmt.Errorf("failed to register skill reader: %w", err)
-	}
-
-	eng := &AgentEngine{
-		provider: llmProvider,
-		registry: toolRegistry,
-
-		thinkMode: thinkMode,
-
-		recovery: icontext.NewRecoveryManager(),
-	}
-	option.Apply(eng, opts...)
-	return eng, nil
-}
-
-// AgentEngineWithCostObserver 为引擎挂载成本观测器 ( 记账 + token 预算闸门 )。
-func AgentEngineWithCostObserver(observer CostObserver) option.Opt[AgentEngine] {
-	return func(eng *AgentEngine) {
-		eng.cost = observer
-	}
-}
-
 // CostObserver 是成本观测器规范 ( 结构化类型匹配，实现方无需依赖本包 )。
 //
 // 方法签名必须与本接口完全一致:
@@ -170,9 +121,60 @@ func WithMaxTurns(maxTurns int) RunOption {
 	}
 }
 
+// AgentEngine 是与工作区无关的 Agent 执行引擎。
+// 单次运行的全部环境 ( 工作区路径 ) 来自 Session，
+// 经由 context 流向 System Prompt 构建与所有工具调用。
+type AgentEngine struct {
+	provider provider.LLMProvider
+	registry tools.Registry
+
+	thinkMode bool
+
+	// cost 进程级成本观测器 ( 系统级策略，构造期注入 )，
+	// 终端与飞书等入口共用同一引擎实例时天然全覆盖。
+	cost CostObserver
+
+	recovery *icontext.RecoveryManager
+}
+
+func NewAgentEngine(
+	llmProvider provider.LLMProvider,
+	toolRegistry tools.Registry,
+	thinkMode bool,
+	opts ...option.Opt[AgentEngine],
+) (*AgentEngine, error) {
+	if toolRegistry == nil {
+		return nil, fmt.Errorf("tool registry is required")
+	}
+
+	if err := toolRegistry.Register(tools.NewSkillReader()); err != nil {
+		return nil, fmt.Errorf("failed to register skill reader: %w", err)
+	}
+
+	eng := &AgentEngine{
+		provider: llmProvider,
+		registry: toolRegistry,
+
+		thinkMode: thinkMode,
+
+		recovery: icontext.NewRecoveryManager(),
+	}
+	option.Apply(eng, opts...)
+	return eng, nil
+}
+
+// AgentEngineWithCostObserver 为引擎挂载成本观测器 ( 记账 + token 预算闸门 )。
+func AgentEngineWithCostObserver(observer CostObserver) option.Opt[AgentEngine] {
+	return func(eng *AgentEngine) {
+		eng.cost = observer
+	}
+}
+
 // Run 在指定会话上执行一次 Agent 运行。
-// 会话承载运行所需的全部环境与状态: Workspace 决定工具的执行范围和
-// System Prompt 的内容，history 跨 Run 持久累积，同会话的多次运行共享上下文。
+//
+// 会话承载运行所需的全部环境与状态:
+// Workspace 决定工具的执行范围和 System Prompt 的内容，
+// history 跨 Run 持久累积，同会话的多次运行共享上下文。
 // opts 为本次运行的可选配置 ( 角色化 System Prompt、轮次预算等 )。
 func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter, opts ...RunOption) error {
 	if err := checkCanceled(ctx); err != nil {

@@ -10,6 +10,7 @@ import (
 )
 
 // CostSnapshot 是某一时刻成本账本的值拷贝 ( 监控/查询用 )。
+//
 // 维度分开输出:
 // 预算拦截用合并总量 ( TotalTokens )，
 // 对账与未来加权计费用缓存子集维度 ( CacheReadTokens / CacheCreationTokens )。
@@ -32,7 +33,7 @@ type CostSnapshot struct {
 // 阈值只会偏保守 ( 提前拦截 )，不会放过预算。
 //
 // 经结构化类型匹配满足 engine.CostObserver ( 方法签名须与接口完全一致 )，
-// 本包不依赖 engine，与 tools.SubReporter / engine.Reporter 的解法同构。
+// 本包不依赖 engine ( 与 tools.SubReporter / engine.Reporter 的解法同构 )。
 //
 // 并发契约: 多会话 ( 终端、飞书、SubAgent ) 的 Run 共享同一实例，全部方法持锁。
 type CostTracker struct {
@@ -53,7 +54,9 @@ type CostTracker struct {
 }
 
 // NewCostTracker 创建成本记账器。
-// model 仅作账本标签; tokenThreshold 小于等于 0 表示不设预算上限。
+//
+// model 仅作账本标签;
+// tokenThreshold 小于等于 0 表示不设预算上限。
 func NewCostTracker(model string, tokenThreshold int) *CostTracker {
 	return &CostTracker{
 		model:          model,
