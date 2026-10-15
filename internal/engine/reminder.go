@@ -3,9 +3,9 @@ package engine
 import (
 	_ "embed"
 	"fmt"
-	"log/slog"
 
 	"github.com/cespare/xxhash/v2"
+	"github.com/jrmarcco/goaw/internal/logging"
 	"github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/schema"
 )
@@ -79,7 +79,7 @@ func (i *ReminderInjector) CheckAndInject(
 		i.consecutiveFailures[fingerprint]++
 		failCnt := i.consecutiveFailures[fingerprint]
 
-		slog.Warn("[reminder] 监控到工具执行失败", "tool_name", toolName, "consecutive_fail_turns", failCnt)
+		logging.For("reminder").Warn("工具执行失败", "tool_name", toolName, "consecutive_fail_turns", failCnt)
 
 		if failCnt >= i.threshold && failCnt > worstCnt {
 			worstCnt = failCnt
@@ -92,7 +92,7 @@ func (i *ReminderInjector) CheckAndInject(
 		return nil
 	}
 
-	slog.Warn("[reminder] 工具触发打断机制。", "tool_name", worstName, "threshold", i.threshold)
+	logging.For("reminder").Warn("死循环检测触发", "tool_name", worstName, "threshold", i.threshold)
 
 	return &schema.Message{
 		// 必须使用 RoleUser，以保证下一次 API 请求时拥有最高的近因效应权重。

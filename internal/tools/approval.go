@@ -2,10 +2,10 @@ package tools
 
 import (
 	"context"
-	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/jrmarcco/goaw/internal/logging"
 	"github.com/jrmarcco/goaw/internal/obs"
 	"github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/schema"
@@ -219,16 +219,16 @@ func (m *ApprovalManager) Middleware() Middleware {
 		}
 
 		if result.Approved() {
-			slog.Debug(
-				"[approval] 工具调用审核通过",
+			logging.For("approval").Debug(
+				"审核通过",
 				"tool_name", tc.Name,
 				"source", result.Source,
 			)
 			return true, ""
 		}
 
-		slog.Info(
-			"[approval] 工具调用审核拒绝",
+		logging.For("approval").Warn(
+			"审核拒绝",
 			"tool_name", tc.Name,
 			"source", result.Source,
 			"reason", result.Reason,

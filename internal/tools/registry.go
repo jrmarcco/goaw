@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 
+	"github.com/jrmarcco/goaw/internal/logging"
 	"github.com/jrmarcco/goaw/internal/obs"
 	"github.com/jrmarcco/goaw/internal/schema"
 )
@@ -33,7 +33,7 @@ func NewDefaultRegistry(initialTools ...Tool) *DefaultRegistry {
 	}
 	for _, tool := range initialTools {
 		if err := registry.Register(tool); err != nil {
-			slog.Error("[registry] 初始工具注册失败", "error", err)
+			logging.For("registry").Error("初始工具注册失败", "error", err)
 		}
 	}
 	return registry
@@ -58,13 +58,13 @@ func (r *DefaultRegistry) Register(tool Tool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.tools[name]; exists {
-		slog.Warn("[registry] 工具已经被注册，将执行覆盖操作。", "name", name)
+		logging.For("registry").Warn("工具重复注册，执行覆盖", "name", name)
 	} else {
 		r.order = append(r.order, name)
 	}
 
 	r.tools[name] = tool
-	slog.Info("[registry] 工具注册成功。", "name", name)
+	logging.For("registry").Debug("工具注册成功", "name", name)
 	return nil
 }
 
@@ -115,7 +115,7 @@ func (r *DefaultRegistry) execute(ctx context.Context, tc schema.ToolCall) schem
 	for _, mw := range r.middlewares {
 		approved, reason := mw(ctx, tc)
 		if !approved {
-			slog.Info("[registry] 工具调用被拦截", "tool_name", tc.Name, "reject_reason", reason)
+			logging.For("registry").Debug("工具调用被拦截", "tool_name", tc.Name, "reason", reason)
 			return schema.ToolCallResult{
 				ID:        tc.ID,
 				Output:    fmt.Sprintf("系统拦截工具调用，原因：%s", reason),

@@ -3,8 +3,8 @@ package obs
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
+	"github.com/jrmarcco/goaw/internal/logging"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -69,7 +69,7 @@ func SetupOTel(ctx context.Context) (func(context.Context) error, error) {
 
 	// SDK 内部错误 ( 导出失败等 ) 导向 slog，避免静默丢失。
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
-		slog.Error("[trace] otel internal error", "error", err)
+		logging.For("trace").Error("otel 内部错误", "error", err)
 	}))
 
 	return provider.Shutdown, nil

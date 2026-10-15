@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 
+	"github.com/jrmarcco/goaw/internal/logging"
 	"github.com/jrmarcco/goaw/internal/schema"
 )
+
+// logPayloadLimit 委派任务与结论等长文本的日志上限。
+const logPayloadLimit = 256
 
 // SubReporter 定义了 SubAgent 运行过程中向上层上报进度的规范。
 //
@@ -202,7 +205,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		reporter = t.reporter
 	}
 
-	slog.Debug("[subagent] 系统发起委派", "role", spec.Name, "prompt", input.Prompt)
+	logging.For("subagent").Debug("发起委派", "role", spec.Name, "prompt", logging.Truncate(input.Prompt, logPayloadLimit))
 
 	output, err := t.runner.RunSub(ctx, spec, input.Prompt, reporter)
 	if err != nil {
@@ -215,7 +218,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		}
 	}
 
-	slog.Debug("[subagent] 委派任务执行完成", "role", spec.Name, "output", output)
+	logging.For("subagent").Debug("委派完成", "role", spec.Name, "output", logging.Truncate(output, logPayloadLimit))
 	return fmt.Sprintf("【子智能体返回任务执行结果】:\n%s", output), nil
 }
 

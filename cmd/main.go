@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -14,6 +13,7 @@ import (
 
 	icontext "github.com/jrmarcco/goaw/internal/context"
 	"github.com/jrmarcco/goaw/internal/engine"
+	"github.com/jrmarcco/goaw/internal/logging"
 	"github.com/jrmarcco/goaw/internal/obs"
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/reporter"
@@ -31,15 +31,15 @@ const (
 )
 
 func main() {
-	// 初始化 slog。
-	// logger, err := zap.NewDevelopment()
-	// if err != nil {
-	// 	log.Fatalf("初始化日志器失败: %v", err)
-	// }
-	// slog.SetDefault(slog.New(zapslog.NewHandler(logger.Core())))
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	})))
+	os.Exit(realMain())
+}
+
+// realMain 承载主流程并返回退出码:
+// 退出语义 ( os.Exit ) 只留在 main，避免中途退出跳过本函数内注册的 defer ( 日志冲刷 )。
+func realMain() int {
+	// 日志系统装配: 单行彩色终端输出，GOAW_LOG_FILE 指定时双写落盘
+	// ( 级别/颜色/文件均经环境变量控制，见 internal/logging 包文档 )。
+	defer logging.Setup()()
 
 	// 通过命令行参数接收用户 prompt。
 	// go run cmd/claw/main.go -prompt="我需要你搭建一个极简的 Go 语言 Web Server 项目。"
@@ -47,16 +47,17 @@ func main() {
 	flag.Parse()
 
 	if *prompt == "" {
-		os.Exit(1)
+		return 1
 	}
 
 	if err := run(*prompt); err != nil {
-		log.Fatalf("引擎运行崩溃: %v", err)
+		slog.Error("引擎运行崩溃", "error", err)
+		return 1
 	}
+	return 0
 }
 
-// run 承载主流程并统一以 error 收尾:
-// 退出语义 ( log.Fatalf ) 只留在 main，避免中途退出跳过本函数内注册的 defer ( 如 OTel 冲刷 )。
+// run 承载主流程并统一以 error 收尾。
 func run(prompt string) error {
 	// 配置了 OTLP 端点时启用 OpenTelemetry 镜像 ( 逐 span 流式导出 )，退出前冲刷缓冲;
 	// 未配置时为空操作，行为与纯自研追踪一致。
@@ -84,7 +85,11 @@ func run(prompt string) error {
 	}
 
 	// CostTracker: 进程级 token 记账与预算拦截 ( 阈值 ≤0 关闭，耗尽后强制收尾 )。
-	costTracker := obs.NewCostTracker(llmModel, tokenBudgetFromEnv())
+	tokenBudget, err := tokenBudgetFromEnv()
+	if err != nil {
+		return err
+	}
+	costTracker := obs.NewCostTracker(llmModel, tokenBudget)
 
 	// 自研追踪树的导出器: 运行结束把整棵树以 JSON 打进日志流。
 	traceExporter := obs.NewSlogExporter()
@@ -144,7 +149,7 @@ func run(prompt string) error {
 	tr := reporter.NewTerminalReporter()
 	sess := sessions.Get("test_web_server_session", workspace, false)
 
-	log.Printf("\n>>> 🚀 收到指令: %s\n", prompt)
+	fmt.Printf("\n🚀 收到指令: %s\n", prompt)
 
 	sess.Append(schema.Message{
 		Role:    schema.RoleUser,
@@ -159,16 +164,16 @@ func run(prompt string) error {
 
 // tokenBudgetFromEnv 解析 token 预算。
 // 环境变量 GOAW_TOKEN_BUDGET 覆盖缺省值，≤0 表示关闭拦截。
-func tokenBudgetFromEnv() int {
+func tokenBudgetFromEnv() (int, error) {
 	raw := os.Getenv("GOAW_TOKEN_BUDGET")
 	if raw == "" {
-		return defaultTokenBudget
+		return defaultTokenBudget, nil
 	}
 	parsed, err := strconv.Atoi(raw)
 	if err != nil {
-		log.Fatalf("GOAW_TOKEN_BUDGET 必须是整数: %v", err)
+		return 0, fmt.Errorf("GOAW_TOKEN_BUDGET 必须是整数: %w", err)
 	}
-	return parsed
+	return parsed, nil
 }
 
 // newSubagentTool 装配 Multi-Agent 的 SubAgent 工具。

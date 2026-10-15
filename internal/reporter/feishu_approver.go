@@ -3,12 +3,13 @@ package reporter
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/jrmarcco/goaw/internal/logging"
 
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
@@ -117,7 +118,7 @@ func (a *FeishuApprover) RequestApproval(ctx context.Context, tc schema.ToolCall
 	defer cancel()
 
 	if err := a.send(sendCtx, chatID, a.buildRequestText(key.reqID, tc)); err != nil {
-		slog.Error("[feishu-approval] 审核请求发送失败", "chat_id", chatID, "req_id", key.reqID, "error", err)
+		logging.For("feishu").Error("审核请求发送失败", "chat_id", chatID, "req_id", key.reqID, "error", err)
 		return tools.ApprovalResult{
 			Decision: tools.DecisionRejected,
 			Reason:   "审核请求发送失败，默认拒绝",
@@ -196,7 +197,7 @@ func (a *FeishuApprover) notify(ctx context.Context, chatID, text string) {
 	defer cancel()
 
 	if err := a.send(notifyCtx, chatID, text); err != nil {
-		slog.Warn("[feishu-approval] 审核回执发送失败", "chat_id", chatID, "error", err)
+		logging.For("feishu").Warn("审核回执发送失败", "chat_id", chatID, "error", err)
 	}
 }
 

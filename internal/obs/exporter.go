@@ -2,7 +2,8 @@ package obs
 
 import (
 	"encoding/json"
-	"log/slog"
+
+	"github.com/jrmarcco/goaw/internal/logging"
 )
 
 // Exporter 是自研追踪树的导出器规范。
@@ -13,7 +14,8 @@ type Exporter interface {
 	Export(root *Span)
 }
 
-// SlogExporter 把整棵追踪树序列化为 JSON，经 slog 输出到现有日志流。
+// SlogExporter 把追踪树经 slog 导出:
+// Info 常驻摘要 ( 节点数与总耗时 )，完整树 JSON 体积大、移入 Debug。
 type SlogExporter struct{}
 
 // NewSlogExporter 创建日志流导出器。
@@ -23,10 +25,26 @@ func NewSlogExporter() *SlogExporter {
 
 // Export 实现 Exporter: 序列化失败降级为错误日志，不中断调用方。
 func (e *SlogExporter) Export(root *Span) {
+	logging.For("trace").Info(
+		"追踪树导出",
+		"root", root.Name,
+		"spans", countSpans(root),
+		"duration_ms", root.DurationMs,
+	)
+
 	payload, err := json.Marshal(root)
 	if err != nil {
-		slog.Error("[trace] 追踪树序列化失败", "root", root.Name, "error", err)
+		logging.For("trace").Error("追踪树序列化失败", "root", root.Name, "error", err)
 		return
 	}
-	slog.Info("[trace] 追踪树导出", "root", root.Name, "trace", string(payload))
+	logging.For("trace").Debug("追踪树完整数据", "trace", string(payload))
+}
+
+// countSpans 统计整树的 Span 节点数 ( 含根 )。
+func countSpans(root *Span) int {
+	count := 1
+	for _, child := range root.Children {
+		count += countSpans(child)
+	}
+	return count
 }

@@ -9,10 +9,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jrmarcco/goaw/internal/logging"
 	"github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
 )
+
+// uxApprovalArgsLimit 审核交互的参数展示上限 ( 决策依据，比进度展示宽松 )。
+const uxApprovalArgsLimit = 1000
 
 var _ tools.Approver = (*TerminalApprover)(nil)
 
@@ -48,8 +52,8 @@ func (a *TerminalApprover) RequestApproval(_ context.Context, tc schema.ToolCall
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	fmt.Printf("\n工具 [%s] 请求人工审核\n参数: %s\n", tc.Name, tc.Args)
-	fmt.Print("允许执行? [y] 允许一次 / [a] 总是允许 / [回车或其他] 拒绝: ")
+	fmt.Printf("\n▸ 工具 %s 请求人工审核\n  参数 %s\n", tc.Name, logging.Truncate(string(tc.Args), uxApprovalArgsLimit))
+	fmt.Print("  允许执行? [y] 允许一次 / [a] 总是允许 / [回车或其他] 拒绝: ")
 
 	line, err := a.stdin.ReadString('\n')
 	if err != nil {

@@ -2,10 +2,10 @@
 package obs
 
 import (
-	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/jrmarcco/goaw/internal/logging"
 	"github.com/jrmarcco/goaw/internal/schema"
 )
 
@@ -77,8 +77,8 @@ func (t *CostTracker) Observe(usage schema.Usage, phase string, took time.Durati
 	t.cacheCreationTokens += usage.CacheCreationTokens
 	t.busyDuration += took
 
-	slog.Debug(
-		"[cost] 模型调用记账",
+	logging.For("cost").Debug(
+		"模型调用记账",
 		"phase", phase,
 		"model", t.model,
 		"prompt_tokens", usage.PromptTokens,
@@ -88,8 +88,8 @@ func (t *CostTracker) Observe(usage schema.Usage, phase string, took time.Durati
 
 	if !t.warned && t.exceededLocked() {
 		t.warned = true
-		slog.Warn(
-			"[cost] token 预算已耗尽，后续运行将被强制收尾",
+		logging.For("cost").Warn(
+			"token 预算已耗尽，后续运行将强制收尾",
 			"model", t.model,
 			"total_tokens", t.totalLocked(),
 			"threshold", t.tokenThreshold,

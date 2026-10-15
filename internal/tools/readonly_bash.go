@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sort"
 	"strings"
 
+	"github.com/jrmarcco/goaw/internal/logging"
 	"github.com/jrmarcco/goaw/internal/schema"
 )
 
@@ -75,7 +75,7 @@ func NewReadOnlyBashMiddleware() Middleware {
 		}
 
 		if reason := checkReadOnlyCommand(input.Command); reason != "" {
-			slog.Info("[readonly] bash 命令被只读策略拦截", "command", input.Command, "reason", reason)
+			logging.For("bash").Debug("只读策略拦截命令", "command", input.Command, "reason", reason)
 			return false, fmt.Sprintf(
 				"只读策略拒绝该命令: %s。仅允许只读命令 ( %s ) 与 git 只读子命令，"+
 					"禁止重定向、命令替换、后台执行与工作区外路径",

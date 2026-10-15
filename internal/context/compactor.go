@@ -2,10 +2,10 @@ package context
 
 import (
 	"fmt"
-	"log/slog"
 	"sync"
 	"unicode/utf8"
 
+	"github.com/jrmarcco/goaw/internal/logging"
 	"github.com/jrmarcco/goaw/internal/schema"
 )
 
@@ -109,8 +109,8 @@ func (c *Compactor) Compact(msgs []schema.Message) []schema.Message {
 		return msgs
 	}
 
-	slog.Warn(
-		"[compactor] 上下文水位触及阈值，触发自适应压缩...",
+	logging.For("compactor").Warn(
+		"上下文压缩触发",
 		"projected_tokens", c.projectTokensLocked(chars),
 		"watermark", c.watermark,
 		"threshold", threshold,
@@ -134,8 +134,8 @@ func (c *Compactor) Compact(msgs []schema.Message) []schema.Message {
 
 	c.sentChars = chars
 
-	slog.Debug(
-		"[compactor] 压缩完成",
+	logging.For("compactor").Debug(
+		"上下文压缩完成",
 		"after_tokens", c.projectTokensLocked(chars),
 		"after_chars", chars,
 	)

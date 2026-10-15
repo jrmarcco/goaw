@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/jrmarcco/goaw/internal/engine"
+	"github.com/jrmarcco/goaw/internal/logging"
 	"github.com/jrmarcco/goaw/internal/schema"
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
@@ -16,6 +16,9 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	"github.com/larksuite/oapi-sdk-go/v3/ws"
 )
+
+// logTextLimit 飞书消息文本的日志上限。
+const logTextLimit = 256
 
 // FeishuBot 封装飞书机器人接口。
 type FeishuBot struct {
@@ -89,7 +92,7 @@ func (b *FeishuBot) StartWithWebSocket(ctx context.Context, eventEncryptKey, ver
 		return fmt.Errorf("eventEncryptKey or verificationToken is empty")
 	}
 
-	slog.Info("[feishu] 正在以 WebSocket 模式启动飞书机器人客户端...")
+	logging.For("feishu").Info("飞书客户端启动中")
 
 	eventDispatcher := dispatcher.NewEventDispatcher(verificationToken, eventEncryptKey).
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
@@ -98,12 +101,12 @@ func (b *FeishuBot) StartWithWebSocket(ctx context.Context, eventEncryptKey, ver
 
 			var m map[string]string
 			if err := json.Unmarshal([]byte(content), &m); err != nil {
-				slog.Error("[feishu] 解析飞书消息内容失败", "error", err)
+				logging.For("feishu").Error("解析飞书消息失败", "error", err)
 				return err
 			}
 
 			text, ok := m["text"]
-			slog.Debug("[feishu] 收到飞书消息", "chat_id", chatID, "text", text)
+			logging.For("feishu").Debug("收到飞书消息", "chat_id", chatID, "text", logging.Truncate(text, logTextLimit))
 
 			if ok && text != "" {
 				// 审核口令优先拦截，路由给等待中的审核请求;
@@ -131,11 +134,11 @@ func (b *FeishuBot) StartWithWebSocket(ctx context.Context, eventEncryptKey, ver
 	)
 
 	if err := wsClient.Start(ctx); err != nil {
-		slog.Error("[feishu] 飞书客户端启动失败", "error", err)
+		logging.For("feishu").Error("飞书客户端启动失败", "error", err)
 		return err
 	}
 
-	slog.Info("[feishu] 飞书客户端已启动")
+	logging.For("feishu").Info("飞书客户端已启动")
 	return nil
 }
 
@@ -224,7 +227,7 @@ func (r *FeishuReporter) sendMessage(ctx context.Context, text string) error {
 		).Build()
 
 	if _, err = r.client.Im.Message.Create(ctx, req); err != nil {
-		slog.Error("[feishu] 发送消息失败", "error", err)
+		logging.For("feishu").Error("发送消息失败", "error", err)
 		return err
 	}
 	return nil

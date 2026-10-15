@@ -3,17 +3,26 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
 	icontext "github.com/jrmarcco/goaw/internal/context"
+	"github.com/jrmarcco/goaw/internal/logging"
 	"github.com/jrmarcco/goaw/internal/obs"
 	"github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
 	"golang.org/x/sync/errgroup"
+)
+
+// 日志截断上限: 大 payload 摘要入日志，完整内容走 trace/调试通道。
+const (
+	// logContentLimit 模型思考与回复内容的日志上限。
+	logContentLimit = 1000
+
+	// logArgsLimit 工具参数、救援提示等结构化负载的日志上限。
+	logArgsLimit = 256
 )
 
 // CostObserver 是成本观测器规范 ( 结构化类型匹配，实现方无需依赖本包 )。
@@ -236,14 +245,14 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter,
 		e.finishRunSpan(runSpan, err)
 	}()
 
-	slog.Info("[engine] Agent 引擎启动", "session", sess.ID, "workspace", sess.Workspace)
-	slog.Info("[engine] 慢思考模式", "enabled", e.thinkMode)
+	logging.For("engine").Info("运行开始", "session", sess.ID, "workspace", sess.Workspace)
+	logging.For("engine").Debug("慢思考模式", "enabled", e.thinkMode)
 
 	// 运行摘要覆盖全部返回路径 ( 正常结束、强制收尾、错误 )。
 	runStart := time.Now()
 	defer func() {
-		slog.Info(
-			"[engine] 运行结束",
+		logging.For("engine").Info(
+			"运行结束",
 			"session", sess.ID,
 			"elapsed", time.Since(runStart),
 			"calls", cfg.calls,
@@ -319,7 +328,7 @@ func (e *AgentEngine) forceFinalTurn(
 	turnSpan.Attribute("turn", turn)
 	turnSpan.Attribute("forced", true)
 
-	slog.Warn("[engine] 预算耗尽，剥夺工具挂载，强制收尾汇报")
+	logging.For("engine").Warn("预算耗尽，强制收尾")
 
 	sess.Append(schema.Message{
 		Role:    schema.RoleUser,
@@ -365,7 +374,7 @@ func (e *AgentEngine) runTurn(
 	defer turnSpan.End()
 	turnSpan.Attribute("turn", turn)
 
-	slog.Info("[engine] start turn", "turn", turn)
+	logging.For("engine").Info("轮次开始", "turn", turn)
 
 	var currThinkingContent string
 	if e.thinkMode {
@@ -400,7 +409,7 @@ func (e *AgentEngine) runTurn(
 	sess.Append(finalAssistantMsg)
 
 	if len(actGen.Message.ToolCalls) == 0 {
-		slog.Debug("[engine] 模型没有请求工具调用，任务结束。")
+		logging.For("engine").Debug("模型未请求工具调用，任务结束")
 		return true, nil
 	}
 
@@ -432,7 +441,7 @@ func (e *AgentEngine) think(
 	contextHistory []schema.Message,
 	reporter Reporter,
 ) (*schema.Generation, error) {
-	slog.Debug("[engine] 剥夺工具访问权，强制进入慢思考与规划阶段...")
+	logging.For("engine").Debug("进入慢思考阶段")
 	if reporter != nil {
 		_ = reporter.OnThinking(ctx)
 	}
@@ -455,7 +464,7 @@ func (e *AgentEngine) think(
 	}
 
 	if thinkGen.Message.Content != "" {
-		slog.Debug("[engine][内部思考] ->", "content", thinkGen.Message.Content)
+		logging.For("engine").Debug("模型思考内容", "content", logging.Truncate(thinkGen.Message.Content, logContentLimit))
 	}
 	return thinkGen, nil
 }
@@ -466,7 +475,7 @@ func (e *AgentEngine) act(
 	contextHistory []schema.Message,
 	reporter Reporter,
 ) (*schema.Generation, error) {
-	slog.Debug("[engine] 恢复工具挂载，等待模型采取行动...")
+	logging.For("engine").Debug("进入行动阶段")
 	// 叶子紧贴 Generate 起止，不吞并 Reporter 回调耗时。
 	genCtx, genSpan := obs.StartSpan(ctx, "llm.generate", obs.WithSpanKind(obs.SpanKindClient))
 	genSpan.Attribute("phase", PhaseAct)
@@ -485,7 +494,7 @@ func (e *AgentEngine) act(
 	}
 
 	if actGen.Message.Content != "" {
-		slog.Debug("[engine][对外回复] ->", "content", actGen.Message.Content)
+		logging.For("engine").Debug("模型回复", "content", logging.Truncate(actGen.Message.Content, logContentLimit))
 		if reporter != nil {
 			_ = reporter.OnMessage(ctx, actGen.Message.Content)
 		}
@@ -507,7 +516,7 @@ func (e *AgentEngine) execToolCalls(
 	toolCalls []schema.ToolCall,
 	reporter Reporter,
 ) ([]schema.Message, error) {
-	slog.Info("[engine] 模型请求并发执行工具调用...", "tool_count", len(toolCalls))
+	logging.For("engine").Info("工具调度", "tool_count", len(toolCalls))
 
 	observations := make([]schema.Message, len(toolCalls))
 	results := make([]schema.ToolCallResult, len(toolCalls))
@@ -515,7 +524,7 @@ func (e *AgentEngine) execToolCalls(
 	errGroup, groupCtx := errgroup.WithContext(ctx)
 	for idx, toolCall := range toolCalls {
 		errGroup.Go(func() error {
-			observation, result, err := e.execToolCall(groupCtx, toolCall, reporter, idx)
+			observation, result, err := e.execToolCall(groupCtx, toolCall, reporter)
 			if err != nil {
 				return err
 			}
@@ -544,17 +553,15 @@ func (e *AgentEngine) execToolCall(
 	ctx context.Context,
 	toolCall schema.ToolCall,
 	reporter Reporter,
-	gidx int,
 ) (schema.Message, schema.ToolCallResult, error) {
 	if err := checkCanceled(ctx); err != nil {
 		return schema.Message{}, schema.ToolCallResult{}, err
 	}
 
-	slog.Info(
-		"[engine] -> 并发执行工具调用",
-		"goroutine_index", gidx,
+	logging.For("engine").Debug(
+		"工具执行开始",
 		"tool_name", toolCall.Name,
-		"args", string(toolCall.Args),
+		"args", logging.Truncate(string(toolCall.Args), logArgsLimit),
 	)
 	if reporter != nil {
 		_ = reporter.OnToolCall(ctx, toolCall.Name, string(toolCall.Args))
@@ -572,22 +579,20 @@ func (e *AgentEngine) execToolCall(
 	if result.IsError {
 		// 发生错误时，按领域错误码注入救援指南。
 		finalOutput = e.recovery.AnalyzeAndInject(toolCall.Name, result.ErrorCode, result.Output)
-		slog.Error(
-			"[engine] -> 工具执行失败，注入救援指南。",
-			"goroutine_index", gidx,
+		logging.For("engine").Error(
+			"工具执行失败",
 			"tool_name", toolCall.Name,
 			"error_code", result.ErrorCode,
-			"recovery_hint", finalOutput,
+			"hint", logging.Truncate(finalOutput, logArgsLimit),
 		)
 	} else if result.ErrorCode != "" {
 		// 软失败 ( 如 bash 命令失败 )：输出照常回传模型自纠，仅按错误码注入救援指南。
 		finalOutput = e.recovery.AnalyzeAndInject(toolCall.Name, result.ErrorCode, result.Output)
-		slog.Warn(
-			"[engine] -> 工具软失败，注入救援指南。",
-			"goroutine_index", gidx,
+		logging.For("engine").Warn(
+			"工具软失败",
 			"tool_name", toolCall.Name,
 			"error_code", result.ErrorCode,
-			"recovery_hint", finalOutput,
+			"hint", logging.Truncate(finalOutput, logArgsLimit),
 		)
 	}
 
