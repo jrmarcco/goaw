@@ -19,7 +19,7 @@ var _ tools.AgentRunner = (*SubAgentRunner)(nil)
 // defaultSubAgentMaxTurns SubAgent 轮次预算缺省值。
 // SubAgent 是父运行同步等待的一次性委派，必须兜住 "一直成功地探索" 的失控场景
 // ( ReminderInjector 只拦截连续失败的工具调用死循环 )。
-const defaultSubAgentMaxTurns = 30
+const defaultSubAgentMaxTurns = 10
 
 // SubAgentRunner 是 tools.AgentRunner 的 engine 侧实现，以 AgentEngine 为执行内核。
 // 接口定义在消费方 tools 包、实现在本包，依赖方向保持 engine → tools。
@@ -29,7 +29,7 @@ type SubAgentRunner struct {
 	provider  provider.LLMProvider
 	thinkMode bool
 
-	// cost 进程级成本观测器，建 SubAgent 引擎时透传——
+	// cost 进程级成本观测器，建 SubAgent 引擎时透传。
 	// SubAgent 与主 Agent 共享同一账本，token 预算是系统级口径。
 	cost CostObserver
 

@@ -115,6 +115,7 @@ func (s *Session) GetWorkingMemory(limit int) []schema.Message {
 	//   - 落在 ToolCallResult 上 → 回退补回发出 ToolCall 的父消息，孤儿自然消除;
 	//   - 落在 Assistant 消息上 → 继续回退，开头必为 user 角色;
 	//   - 窗口内全是 ToolCallResult → 一路回退到 Run 的开场用户消息，不会返回空窗口。
+	//
 	// history[0] 由 Run 流程保证是普通用户消息，循环必然终止;
 	// limit 小于等于 0 时 start 恒为 0，循环零开销。
 	for start > 0 && !isPlainUserMessage(s.history[start]) {
@@ -139,7 +140,7 @@ func (s *Session) Last() schema.Message {
 }
 
 // isPlainUserMessage 判断是否为普通 User 消息。
-// ToolCallResult ( RoleUser 且含 ToolCallID ) 不算:
+// ToolCallResult ( RoleUser 且含 ToolCallID ) 除外，
 // 它必须跟在对应 ToolCall 之后，不能充当合法的序列开头。
 func isPlainUserMessage(msg schema.Message) bool {
 	return msg.Role == schema.RoleUser && msg.ToolCallID == ""
