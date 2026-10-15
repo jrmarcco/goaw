@@ -39,11 +39,11 @@ func (e *FileEditor) Definition() schema.ToolDefinition {
 			schema.KeyProperties: map[string]any{
 				propNamePath: map[string]any{
 					schema.KeyType:        schema.TypeString,
-					schema.KeyDescription: "待修改的文件相对路径，例如 cmd/main.go",
+					schema.KeyDescription: "待修改的文件相对路径，例如 cmd/main.go。",
 				},
 				propNameOldContent: map[string]any{
 					schema.KeyType:        schema.TypeString,
-					schema.KeyDescription: "文件中原有的内容文本，必须包含足够的上下文",
+					schema.KeyDescription: "文件中原有的内容文本，必须包含足够的上下文。",
 				},
 				propNameNewContent: map[string]any{
 					schema.KeyType:        schema.TypeString,

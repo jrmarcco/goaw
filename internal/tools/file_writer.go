@@ -40,7 +40,7 @@ func (w *FileWriter) Definition() schema.ToolDefinition {
 				},
 				propNameContent: map[string]any{
 					schema.KeyType:        schema.TypeString,
-					schema.KeyDescription: "待写入的完整内容",
+					schema.KeyDescription: "待写入的完整内容。",
 				},
 			},
 			schema.KeyRequired: []string{propNamePath, propNameContent},

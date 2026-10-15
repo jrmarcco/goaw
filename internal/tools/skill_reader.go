@@ -34,7 +34,7 @@ func (r *SkillReader) Definition() schema.ToolDefinition {
 			schema.KeyProperties: map[string]any{
 				propName: map[string]any{
 					schema.KeyType:        schema.TypeString,
-					schema.KeyDescription: "System Prompt 技能索引中的技能名称",
+					schema.KeyDescription: "System Prompt 技能索引中的技能名称。",
 				},
 			},
 			schema.KeyRequired: []string{propName},
