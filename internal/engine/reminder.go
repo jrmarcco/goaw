@@ -6,8 +6,8 @@ import (
 	"log/slog"
 
 	"github.com/cespare/xxhash/v2"
+	"github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/schema"
-	"github.com/jrmarcco/jit/xbean/option"
 )
 
 const defaultRemindThreshold = 3

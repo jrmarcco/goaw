@@ -9,8 +9,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/schema"
-	"github.com/jrmarcco/jit/xbean/option"
 )
 
 //go:embed prompts/core.md

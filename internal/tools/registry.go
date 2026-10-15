@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jrmarcco/goaw/internal/obs"
 	"github.com/jrmarcco/goaw/internal/schema"
 )
 
@@ -78,7 +79,23 @@ func (r *DefaultRegistry) GetAvailableTools() []schema.ToolDefinition {
 	return tds
 }
 
+// Execute 路由并执行一次工具调用，外围建立 tool.execute 追踪叶子
+// ( 审批等待等信息经属性汇入本叶子，见 ApprovalManager.Middleware )。
 func (r *DefaultRegistry) Execute(ctx context.Context, tc schema.ToolCall) schema.ToolCallResult {
+	_, span := obs.StartSpan(ctx, "tool.execute")
+	defer span.End()
+	span.Attribute("tool_name", tc.Name)
+
+	result := r.execute(ctx, tc)
+	span.Attribute("is_error", result.IsError)
+	if result.ErrorCode != "" {
+		span.Attribute("error_code", result.ErrorCode)
+	}
+	return result
+}
+
+// execute 工具调用的实际执行体: 中间件链拦截 → 工具本体执行。
+func (r *DefaultRegistry) execute(ctx context.Context, tc schema.ToolCall) schema.ToolCallResult {
 	// 路由查找。
 	r.mu.RLock()
 	tool, ok := r.tools[tc.Name]

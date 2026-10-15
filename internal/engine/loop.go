@@ -8,10 +8,11 @@ import (
 	"time"
 
 	icontext "github.com/jrmarcco/goaw/internal/context"
+	"github.com/jrmarcco/goaw/internal/obs"
+	"github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
-	"github.com/jrmarcco/jit/xbean/option"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -63,6 +64,9 @@ type runConfig struct {
 	promptTokens     int
 	completionTokens int
 	calls            int
+
+	// traceRootAttrs 追踪根 Span 的附加属性 ( 见 WithRootSpanAttributes )。
+	traceRootAttrs map[string]any
 }
 
 // buildSystemMessage 组装本次运行的 System Prompt。
@@ -121,6 +125,14 @@ func WithMaxTurns(maxTurns int) RunOption {
 	}
 }
 
+// WithRootSpanAttributes 为本次运行的追踪根 Span 附加属性
+// ( 角色化 SubAgent 的 role 标识经此进入子任务树根 )。
+func WithRootSpanAttributes(attrs map[string]any) RunOption {
+	return func(cfg *runConfig) {
+		cfg.traceRootAttrs = attrs
+	}
+}
+
 // AgentEngine 是与工作区无关的 Agent 执行引擎。
 // 单次运行的全部环境 ( 工作区路径 ) 来自 Session，
 // 经由 context 流向 System Prompt 构建与所有工具调用。
@@ -133,6 +145,10 @@ type AgentEngine struct {
 	// cost 进程级成本观测器 ( 系统级策略，构造期注入 )，
 	// 终端与飞书等入口共用同一引擎实例时天然全覆盖。
 	cost CostObserver
+
+	// traceExporter 自研追踪树的导出器 ( 运行结束导出整棵树;
+	// OTel 镜像管线独立于此，由全局 TracerProvider 自行流式 )。
+	traceExporter obs.Exporter
 
 	recovery *icontext.RecoveryManager
 }
@@ -170,15 +186,22 @@ func AgentEngineWithCostObserver(observer CostObserver) option.Opt[AgentEngine] 
 	}
 }
 
+// AgentEngineWithTraceExporter 为引擎挂载追踪导出器 ( 运行结束导出整棵追踪树 )。
+func AgentEngineWithTraceExporter(exporter obs.Exporter) option.Opt[AgentEngine] {
+	return func(eng *AgentEngine) {
+		eng.traceExporter = exporter
+	}
+}
+
 // Run 在指定会话上执行一次 Agent 运行。
 //
 // 会话承载运行所需的全部环境与状态:
 // Workspace 决定工具的执行范围和 System Prompt 的内容，
 // history 跨 Run 持久累积，同会话的多次运行共享上下文。
 // opts 为本次运行的可选配置 ( 角色化 System Prompt、轮次预算等 )。
-func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter, opts ...RunOption) error {
-	if err := checkCanceled(ctx); err != nil {
-		return err
+func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter, opts ...RunOption) (err error) {
+	if cancelErr := checkCanceled(ctx); cancelErr != nil {
+		return cancelErr
 	}
 	if sess == nil {
 		return fmt.Errorf("session is required")
@@ -206,6 +229,13 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter,
 	ctx = tools.WithWorkspace(ctx, sess.Workspace)
 	ctx = tools.WithSubReporter(ctx, reporter)
 
+	// 一次完整任务的追踪根，失败信号与整树导出覆盖全部返回路径。
+	ctx, runSpan := e.startRunSpan(ctx, sess, &cfg)
+	defer func() {
+		// 闭包捕获命名返回值 err，defer 执行时读到的即运行最终错误。
+		e.finishRunSpan(runSpan, err)
+	}()
+
 	slog.Info("[engine] Agent 引擎启动", "session", sess.ID, "workspace", sess.Workspace)
 	slog.Info("[engine] 慢思考模式", "enabled", e.thinkMode)
 
@@ -229,7 +259,7 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter,
 
 	for turn := 1; ; turn++ {
 		if reminder, forced := cfg.forcedReminder(turn); forced {
-			return e.forceFinalTurn(ctx, sess, systemMessage, reporter, reminder, &cfg)
+			return e.forceFinalTurn(ctx, sess, systemMessage, reporter, reminder, &cfg, turn)
 		}
 		done, err := e.runTurn(ctx, sess, systemMessage, reporter, turn, &cfg)
 		if err != nil {
@@ -238,6 +268,30 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter,
 		if done {
 			return nil
 		}
+	}
+}
+
+// startRunSpan 为本次运行建立追踪根: Run 即树顶，自研侧不挂父、OTel 侧开新 Trace
+// ( 子代理运行是独立任务树，经属性与父树互链 )。
+func (e *AgentEngine) startRunSpan(ctx context.Context, sess *Session, cfg *runConfig) (context.Context, *obs.Span) {
+	ctx, runSpan := obs.StartRootSpan(ctx, "agent.run")
+	runSpan.Attribute("session", sess.ID)
+	runSpan.Attribute("workspace", sess.Workspace)
+	runSpan.Attribute("think_mode", e.thinkMode)
+	for key, val := range cfg.traceRootAttrs {
+		runSpan.Attribute(key, val)
+	}
+	return ctx, runSpan
+}
+
+// finishRunSpan 结束追踪根并导出整树; err 为运行的最终错误，失败信号经此覆盖全部返回路径。
+func (e *AgentEngine) finishRunSpan(runSpan *obs.Span, err error) {
+	if err != nil {
+		runSpan.SetError(err)
+	}
+	runSpan.End()
+	if e.traceExporter != nil {
+		e.traceExporter.Export(runSpan)
 	}
 }
 
@@ -253,10 +307,17 @@ func (e *AgentEngine) forceFinalTurn(
 	reporter Reporter,
 	reminder string,
 	cfg *runConfig,
+	turn int,
 ) error {
 	if err := checkCanceled(ctx); err != nil {
 		return err
 	}
+
+	// 强制收尾也是一轮 Turn: 以 forced 标记挂在 Turn 层，final 补全是其叶子。
+	_, turnSpan := obs.StartSpan(ctx, "turn")
+	defer turnSpan.End()
+	turnSpan.Attribute("turn", turn)
+	turnSpan.Attribute("forced", true)
 
 	slog.Warn("[engine] 预算耗尽，剥夺工具挂载，强制收尾汇报")
 
@@ -266,10 +327,17 @@ func (e *AgentEngine) forceFinalTurn(
 	})
 
 	start := time.Now()
-	finalGen, err := e.provider.Generate(ctx, e.buildRequestHistory(systemMessage, sess), nil)
+	genCtx, genSpan := obs.StartSpan(ctx, "llm.generate", obs.WithSpanKind(obs.SpanKindClient))
+	genSpan.Attribute("phase", PhaseFinal)
+	finalGen, err := e.provider.Generate(genCtx, e.buildRequestHistory(systemMessage, sess), nil)
 	if err != nil {
+		genSpan.SetError(err)
+		genSpan.End()
 		return fmt.Errorf("failed to generate forced final response: %w", err)
 	}
+	genSpan.Attribute("prompt_tokens", finalGen.Usage.PromptTokens)
+	genSpan.Attribute("completion_tokens", finalGen.Usage.CompletionTokens)
+	genSpan.End()
 	cfg.observe(finalGen.Usage, PhaseFinal, time.Since(start))
 
 	content := strings.TrimSpace(finalGen.Message.Content)
@@ -291,6 +359,12 @@ func (e *AgentEngine) runTurn(
 	if err := checkCanceled(ctx); err != nil {
 		return false, err
 	}
+
+	// 轮次是根与叶子之间的中间层: 本轮的 LLM 调用与工具调用都挂接其下。
+	ctx, turnSpan := obs.StartSpan(ctx, "turn")
+	defer turnSpan.End()
+	turnSpan.Attribute("turn", turn)
+
 	slog.Info("[engine] start turn", "turn", turn)
 
 	var currThinkingContent string
@@ -340,11 +414,10 @@ func (e *AgentEngine) runTurn(
 }
 
 // buildRequestHistory 组装一次模型调用的请求上下文:
-//
-//	System Prompt + 会话工作记忆，再经会话级 Compactor 自适应压缩。
-//	工作记忆暂不设条数与 Token 预算，
-//	上下文压力统一交给 Compactor 基于真实 Token 水位线处理，
-//	避免硬截断丢弃 Compactor 本可仅掩码的内容。
+// System Prompt + 会话工作记忆，再经会话级 Compactor 自适应压缩。
+// 工作记忆暂不设条数与 Token 预算，
+// 上下文压力统一交给 Compactor 基于真实 Token 水位线处理，
+// 避免硬截断丢弃 Compactor 本可仅掩码的内容。
 func (e *AgentEngine) buildRequestHistory(systemMessage schema.Message, sess *Session) []schema.Message {
 	workingMemory := sess.GetWorkingMemory(0)
 	history := make([]schema.Message, 0, len(workingMemory)+1)
@@ -364,10 +437,19 @@ func (e *AgentEngine) think(
 		_ = reporter.OnThinking(ctx)
 	}
 
-	thinkGen, err := e.provider.Generate(ctx, contextHistory, nil)
+	// 叶子紧贴 Generate 起止，不吞并 Reporter 回调耗时。
+	genCtx, genSpan := obs.StartSpan(ctx, "llm.generate", obs.WithSpanKind(obs.SpanKindClient))
+	genSpan.Attribute("phase", PhaseThink)
+
+	thinkGen, err := e.provider.Generate(genCtx, contextHistory, nil)
 	if err != nil {
+		genSpan.SetError(err)
+		genSpan.End()
 		return nil, fmt.Errorf("failed to generate thinking response: %w", err)
 	}
+	genSpan.Attribute("prompt_tokens", thinkGen.Usage.PromptTokens)
+	genSpan.Attribute("completion_tokens", thinkGen.Usage.CompletionTokens)
+	genSpan.End()
 	if err := checkCanceled(ctx); err != nil {
 		return nil, err
 	}
@@ -385,10 +467,19 @@ func (e *AgentEngine) act(
 	reporter Reporter,
 ) (*schema.Generation, error) {
 	slog.Debug("[engine] 恢复工具挂载，等待模型采取行动...")
-	actGen, err := e.provider.Generate(ctx, contextHistory, e.registry.GetAvailableTools())
+	// 叶子紧贴 Generate 起止，不吞并 Reporter 回调耗时。
+	genCtx, genSpan := obs.StartSpan(ctx, "llm.generate", obs.WithSpanKind(obs.SpanKindClient))
+	genSpan.Attribute("phase", PhaseAct)
+
+	actGen, err := e.provider.Generate(genCtx, contextHistory, e.registry.GetAvailableTools())
 	if err != nil {
+		genSpan.SetError(err)
+		genSpan.End()
 		return nil, fmt.Errorf("failed to generate action response: %w", err)
 	}
+	genSpan.Attribute("prompt_tokens", actGen.Usage.PromptTokens)
+	genSpan.Attribute("completion_tokens", actGen.Usage.CompletionTokens)
+	genSpan.End()
 	if err := checkCanceled(ctx); err != nil {
 		return nil, err
 	}

@@ -8,8 +8,8 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	xoption "github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/schema"
-	xoption "github.com/jrmarcco/jit/xbean/option"
 )
 
 var _ LLMProvider = (*AnthropicProvider)(nil)

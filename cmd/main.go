@@ -50,6 +50,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := run(*prompt); err != nil {
+		log.Fatalf("引擎运行崩溃: %v", err)
+	}
+}
+
+// run 承载主流程并统一以 error 收尾:
+// 退出语义 ( log.Fatalf ) 只留在 main，避免中途退出跳过本函数内注册的 defer ( 如 OTel 冲刷 )。
+func run(prompt string) error {
+	// 配置了 OTLP 端点时启用 OpenTelemetry 镜像 ( 逐 span 流式导出 )，退出前冲刷缓冲;
+	// 未配置时为空操作，行为与纯自研追踪一致。
+	otelShutdown, err := setupOTelFromEnv()
+	if err != nil {
+		return fmt.Errorf("装配 OpenTelemetry 失败: %w", err)
+	}
+	defer shutdownOTel(otelShutdown)
+
 	fmt.Println("🚀 欢迎使用 goaw!")
 
 	workspace, _ := os.Getwd()
@@ -64,11 +80,14 @@ func main() {
 
 	llmProvider, err := provider.NewAnthropicProvider(os.Getenv("ANTHROPIC_API_KEY"), llmModel, llmOpts...)
 	if err != nil {
-		log.Fatalf("创建模型提供者失败: %v", err)
+		return fmt.Errorf("创建模型提供者失败: %w", err)
 	}
 
 	// CostTracker: 进程级 token 记账与预算拦截 ( 阈值 ≤0 关闭，耗尽后强制收尾 )。
 	costTracker := obs.NewCostTracker(llmModel, tokenBudgetFromEnv())
+
+	// 自研追踪树的导出器: 运行结束把整棵树以 JSON 打进日志流。
+	traceExporter := obs.NewSlogExporter()
 
 	// 挂载 4 个基础工具。
 	toolRegistry := tools.NewDefaultRegistry(
@@ -87,47 +106,19 @@ func main() {
 	eng, err := engine.NewAgentEngine(
 		llmProvider, toolRegistry, false,
 		engine.AgentEngineWithCostObserver(costTracker),
+		engine.AgentEngineWithTraceExporter(traceExporter),
 	)
 	if err != nil {
-		log.Fatalf("创建 Agent 引擎失败: %v", err)
+		return fmt.Errorf("创建 Agent 引擎失败: %w", err)
 	}
 
 	// Multi-Agent: SubAgent 按角色规格 ( SubAgentSpec ) 装配，角色决定 System Prompt 与工具集。
-	//
-	// Explorer 是只读信息收集角色:
-	// 注册表不含 spawn_subagent ( 天然无递归 )，
-	// bash 经白名单中间件硬性约束为只读，不挂审核中间件 ( 只读由构造保证，审核留给主 Agent 的写路径 )。
-	subRegistry := tools.NewDefaultRegistry(
-		tools.NewFileReader(),
-		tools.NewBashExecutor(),
-	)
-	subRegistry.Use(tools.NewReadOnlyBashMiddleware())
-
-	subRunner, err := engine.NewSubAgentRunner(
-		llmProvider, false,
-		engine.SubAgentRunnerWithCostObserver(costTracker),
-	)
+	subagentTool, err := newSubagentTool(llmProvider, costTracker, traceExporter)
 	if err != nil {
-		log.Fatalf("创建 SubAgent 运行器失败: %v", err)
-	}
-
-	// explorerMaxTurns Explorer 角色的轮次预算。
-	const explorerMaxTurns = 30
-
-	explorerSpec := tools.SubAgentSpec{
-		Name:         "explorer",
-		Description:  "只读信息收集专员，在当前工作区内检索代码、日志与配置，返回带证据出处的调研结论。适用于检索、调研与总结，不适用于需要修改文件的任务。",
-		SystemPrompt: icontext.ExplorerRolePrompt,
-		MaxTurns:     explorerMaxTurns,
-		Registry:     subRegistry,
-	}
-
-	subagentTool, err := tools.NewSubagentTool(subRunner, []tools.SubAgentSpec{explorerSpec}, nil)
-	if err != nil {
-		log.Fatalf("创建 SubAgent 工具失败: %v", err)
+		return fmt.Errorf("装配 SubAgent 工具失败: %w", err)
 	}
 	if err := toolRegistry.Register(subagentTool); err != nil {
-		log.Fatalf("注册 SubAgent 工具失败: %v", err)
+		return fmt.Errorf("注册 SubAgent 工具失败: %w", err)
 	}
 
 	// 会话管理器为进程级单例，由所有入口 ( 飞书机器人、终端 ) 共享，
@@ -153,16 +144,17 @@ func main() {
 	tr := reporter.NewTerminalReporter()
 	sess := sessions.Get("test_web_server_session", workspace, false)
 
-	log.Printf("\n>>> 🚀 收到指令: %s\n", *prompt)
+	log.Printf("\n>>> 🚀 收到指令: %s\n", prompt)
 
 	sess.Append(schema.Message{
 		Role:    schema.RoleUser,
-		Content: *prompt,
+		Content: prompt,
 	})
 
 	if err := eng.Run(context.Background(), sess, tr); err != nil {
-		log.Fatalf("引擎运行崩溃: %v", err)
+		return fmt.Errorf("引擎运行崩溃: %w", err)
 	}
+	return nil
 }
 
 // tokenBudgetFromEnv 解析 token 预算。
@@ -177,6 +169,61 @@ func tokenBudgetFromEnv() int {
 		log.Fatalf("GOAW_TOKEN_BUDGET 必须是整数: %v", err)
 	}
 	return parsed
+}
+
+// newSubagentTool 装配 Multi-Agent 的 SubAgent 工具。
+//
+// Explorer 是只读信息收集角色:
+// 注册表不含 spawn_subagent ( 天然无递归 )，
+// bash 经白名单中间件硬性约束为只读，不挂审核中间件 ( 只读由构造保证，审核留给主 Agent 的写路径 )。
+func newSubagentTool(
+	llmProvider provider.LLMProvider,
+	costTracker *obs.CostTracker,
+	traceExporter obs.Exporter,
+) (*tools.SubagentTool, error) {
+	subRegistry := tools.NewDefaultRegistry(
+		tools.NewFileReader(),
+		tools.NewBashExecutor(),
+	)
+	subRegistry.Use(tools.NewReadOnlyBashMiddleware())
+
+	subRunner, err := engine.NewSubAgentRunner(
+		llmProvider, false,
+		engine.SubAgentRunnerWithCostObserver(costTracker),
+		engine.SubAgentRunnerWithTraceExporter(traceExporter),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("创建 SubAgent 运行器失败: %w", err)
+	}
+
+	// explorerMaxTurns Explorer 角色的轮次预算。
+	const explorerMaxTurns = 30
+
+	explorerSpec := tools.SubAgentSpec{
+		Name:         "explorer",
+		Description:  "只读信息收集专员，在当前工作区内检索代码、日志与配置，返回带证据出处的调研结论。适用于检索、调研与总结，不适用于需要修改文件的任务。",
+		SystemPrompt: icontext.ExplorerRolePrompt,
+		MaxTurns:     explorerMaxTurns,
+		Registry:     subRegistry,
+	}
+
+	return tools.NewSubagentTool(subRunner, []tools.SubAgentSpec{explorerSpec}, nil)
+}
+
+// setupOTelFromEnv 检测 OTLP 端点环境变量并装配 OpenTelemetry 镜像管线。
+// 未配置时返回空操作，调用方无需判空。
+func setupOTelFromEnv() (func(context.Context) error, error) {
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" {
+		return func(context.Context) error { return nil }, nil
+	}
+	return obs.SetupOTel(context.Background())
+}
+
+// shutdownOTel 冲刷 OTel 缓冲区中的已结束跨度。
+func shutdownOTel(shutdown func(context.Context) error) {
+	if err := shutdown(context.Background()); err != nil {
+		slog.Error("[trace] otel 冲刷失败", "error", err)
+	}
 }
 
 //nolint:unused // 测试调试阶段。

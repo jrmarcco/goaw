@@ -8,10 +8,11 @@ import (
 	"sync/atomic"
 
 	icontext "github.com/jrmarcco/goaw/internal/context"
+	"github.com/jrmarcco/goaw/internal/obs"
+	"github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/provider"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
-	"github.com/jrmarcco/jit/xbean/option"
 )
 
 var _ tools.AgentRunner = (*SubAgentRunner)(nil)
@@ -33,6 +34,10 @@ type SubAgentRunner struct {
 	// SubAgent 与主 Agent 共享同一账本，token 预算是系统级口径。
 	cost CostObserver
 
+	// traceExporter 子代理任务的追踪导出器，建 SubAgent 引擎时透传;
+	// 子代理运行是独立任务树 ( Run 内以 StartRootSpan 开根 )，各自导出。
+	traceExporter obs.Exporter
+
 	seq atomic.Int64 // SubAgent 会话序号，保证会话 ID 唯一
 
 	// 引擎与注册表绑定 ( SkillReader 在 NewAgentEngine 中注册 )，
@@ -45,6 +50,13 @@ type SubAgentRunner struct {
 func SubAgentRunnerWithCostObserver(observer CostObserver) option.Opt[SubAgentRunner] {
 	return func(r *SubAgentRunner) {
 		r.cost = observer
+	}
+}
+
+// SubAgentRunnerWithTraceExporter 为运行器挂载追踪导出器 ( 子任务树独立导出 )。
+func SubAgentRunnerWithTraceExporter(exporter obs.Exporter) option.Opt[SubAgentRunner] {
+	return func(r *SubAgentRunner) {
+		r.traceExporter = exporter
 	}
 }
 
@@ -90,6 +102,13 @@ func (r *SubAgentRunner) RunSub(
 
 	subReporter := &subRunReporter{downstream: reporter}
 	sess := NewSession(fmt.Sprintf("subagent-%d", r.seq.Add(1)), workspace, false)
+
+	// 子代理运行是独立任务树 ( Run 内以 StartRootSpan 开根 ):
+	// 子树定位信息回写父树的 tool.execute 叶子，实现两棵树的互链。
+	if span, ok := obs.SpanFromContext(ctx); ok {
+		span.Attribute("subagent.session", sess.ID)
+	}
+
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
 	if err := eng.Run(ctx, sess, subReporter, subRunOptions(spec)...); err != nil {
@@ -116,6 +135,8 @@ func subRunOptions(spec tools.SubAgentSpec) []RunOption {
 	return []RunOption{
 		WithSystemComposer(composeRole),
 		WithMaxTurns(maxTurns),
+		// 子任务树根携带角色标识，与父树的 subagent.session 属性互链。
+		WithRootSpanAttributes(map[string]any{"role": spec.Name}),
 	}
 }
 
@@ -143,6 +164,9 @@ func (r *SubAgentRunner) engineFor(registry tools.Registry) (*AgentEngine, error
 	var engOpts []option.Opt[AgentEngine]
 	if r.cost != nil {
 		engOpts = append(engOpts, AgentEngineWithCostObserver(r.cost))
+	}
+	if r.traceExporter != nil {
+		engOpts = append(engOpts, AgentEngineWithTraceExporter(r.traceExporter))
 	}
 
 	eng, err := NewAgentEngine(r.provider, registry, r.thinkMode, engOpts...)

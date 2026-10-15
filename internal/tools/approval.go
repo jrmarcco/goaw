@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jrmarcco/goaw/internal/obs"
+	"github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/schema"
-	"github.com/jrmarcco/jit/xbean/option"
 )
 
 const defaultApprovalTimeout = 5 * time.Minute
@@ -203,9 +204,20 @@ func (m *ApprovalManager) Approve(ctx context.Context, tc schema.ToolCall) Appro
 
 // Middleware 将管理器适配为 Registry 的审核中间件。
 // 拒绝时的原因文案由 Registry 统一包装为 ErrCodeCallIntercepted 回传模型。
+// 审核不建子 Span: 决定来源与等待耗时 ( 可能长达人工超时 ) 并入当前
+// tool.execute Span 的属性，保持 "Turn 内操作为叶子" 的树形约束。
 func (m *ApprovalManager) Middleware() Middleware {
 	return func(ctx context.Context, tc schema.ToolCall) (bool, string) {
+		start := time.Now()
 		result := m.Approve(ctx, tc)
+
+		// context 无 Span 时静默跳过 ( 兼容脱离 Registry 的直接调用 )。
+		if span, ok := obs.SpanFromContext(ctx); ok {
+			span.Attribute("approval.source", result.Source)
+			span.Attribute("approval.decision", result.Decision)
+			span.Attribute("approval.wait_ms", time.Since(start).Milliseconds())
+		}
+
 		if result.Approved() {
 			slog.Debug(
 				"[approval] 工具调用审核通过",

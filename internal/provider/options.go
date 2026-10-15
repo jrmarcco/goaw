@@ -1,6 +1,6 @@
 package provider
 
-import "github.com/jrmarcco/jit/xbean/option"
+import "github.com/jrmarcco/goaw/internal/option"
 
 // Opt 是 Provider 构造函数的可选参数。
 type Opt = option.Opt[providerOpts]

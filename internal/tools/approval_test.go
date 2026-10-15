@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrmarcco/goaw/internal/obs"
 	"github.com/jrmarcco/goaw/internal/schema"
 )
 
@@ -320,11 +321,9 @@ func TestApproveConcurrentRemember(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range concurrency {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			results[i] = manager.Approve(context.Background(), schema.ToolCall{ID: stubCallID, Name: writeToolName})
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -332,5 +331,35 @@ func TestApproveConcurrentRemember(t *testing.T) {
 		if result.Decision != DecisionApproved {
 			t.Fatalf("results[%d].Decision = %q, want %q", idx, result.Decision, DecisionApproved)
 		}
+	}
+}
+
+// TestMiddlewareAnnotatesCurrentSpan 审批结果与等待时长应并入当前 tool.execute
+// Span 的属性 ( 不建子 Span，保持叶子语义 ); 无 Span 上下文时静默跳过。
+func TestMiddlewareAnnotatesCurrentSpan(t *testing.T) {
+	t.Parallel()
+
+	manager := NewApprovalManager()
+	mw := manager.Middleware()
+
+	ctx, span := obs.StartSpan(context.Background(), "tool.execute")
+	approved, reason := mw(ctx, schema.ToolCall{ID: stubCallID, Name: readOnlyToolName})
+
+	if !approved || reason != "" {
+		t.Fatalf("只读工具应经策略放行，实际 approved=%v reason=%q", approved, reason)
+	}
+	if got := span.Attributes["approval.source"]; got != SourcePolicy {
+		t.Fatalf("审批来源属性应为 policy，实际 %v", got)
+	}
+	if got := span.Attributes["approval.decision"]; got != DecisionApproved {
+		t.Fatalf("审批决定属性应为 approved，实际 %v", got)
+	}
+	if _, ok := span.Attributes["approval.wait_ms"]; !ok {
+		t.Fatal("应记录审批等待时长属性")
+	}
+
+	// 无 Span 上下文 ( 脱离 Registry 的直接调用 ) 不应影响审批链路。
+	if _, reason := mw(context.Background(), schema.ToolCall{ID: stubCallID, Name: readOnlyToolName}); reason != "" {
+		t.Fatalf("无 Span 上下文时不应产生拦截原因，实际 %q", reason)
 	}
 }

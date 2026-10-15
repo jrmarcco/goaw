@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	xoption "github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/schema"
-	xoption "github.com/jrmarcco/jit/xbean/option"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jrmarcco/goaw/internal/option"
 	"github.com/jrmarcco/goaw/internal/schema"
 	"github.com/jrmarcco/goaw/internal/tools"
-	"github.com/jrmarcco/jit/xbean/option"
 )
 
 var _ tools.Approver = (*TerminalApprover)(nil)
