@@ -402,7 +402,10 @@ func buildRepairFeedback(attempt int, validateOut, runErr string) string {
 	}
 	b.WriteString("。校验脚本输出如下 ( 可能截断 ):\n")
 	b.WriteString(truncate(validateOut, validateFeedbackLimit))
-	b.WriteString("\n请根据以上反馈定位并修复问题，使校验脚本能够通过; 不要重做整个任务，只修复未通过的部分。")
+	b.WriteString(`
+	请根据以上反馈定位并修复问题，使校验脚本能够通过;
+	不要重做整个任务，只修复未通过的部分。
+	`)
 
 	return b.String()
 }
