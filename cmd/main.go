@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	// llmModel 模型标识 ( 记账账本标签与实际调用目标 )。
-	llmModel = "glm-5.3"
+	// defaultModel 模型标识 ( 记账账本标签与实际调用目标 )。
+	defaultModel = "glm-5.3"
 
 	// defaultTokenBudget token 预算缺省值 ( prompt+completion 合并口径，进程级累计 )，
 	// 可用环境变量 GOAW_TOKEN_BUDGET 覆盖，≤0 关闭拦截。
@@ -37,7 +37,8 @@ func main() {
 // realMain 承载主流程并返回退出码:
 // 退出语义 ( os.Exit ) 只留在 main，避免中途退出跳过本函数内注册的 defer ( 日志冲刷 )。
 func realMain() int {
-	// 日志系统装配: 单行彩色终端输出，GOAW_LOG_FILE 指定时双写落盘
+	// 日志系统装配:
+	// 单行彩色终端输出，GOAW_LOG_FILE 指定时双写落盘
 	// ( 级别/颜色/文件均经环境变量控制，见 internal/logging 包文档 )。
 	defer logging.Setup()()
 
@@ -67,7 +68,7 @@ func run(prompt string) error {
 	}
 	defer shutdownOTel(otelShutdown)
 
-	fmt.Println("🚀 欢迎使用 goaw!")
+	fmt.Println("🚀 欢迎使用 Goaw!")
 
 	workspace, _ := os.Getwd()
 	// TODO: 测试用。
@@ -79,7 +80,7 @@ func run(prompt string) error {
 		llmOpts = append(llmOpts, provider.WithBaseURL(baseURL))
 	}
 
-	llmProvider, err := provider.NewAnthropicProvider(os.Getenv("ANTHROPIC_API_KEY"), llmModel, llmOpts...)
+	llmProvider, err := provider.NewAnthropicProvider(os.Getenv("ANTHROPIC_API_KEY"), defaultModel, llmOpts...)
 	if err != nil {
 		return fmt.Errorf("创建模型提供者失败: %w", err)
 	}
@@ -89,7 +90,7 @@ func run(prompt string) error {
 	if err != nil {
 		return err
 	}
-	costTracker := obs.NewCostTracker(llmModel, tokenBudget)
+	costTracker := obs.NewCostTracker(defaultModel, tokenBudget)
 
 	// 自研追踪树的导出器: 运行结束把整棵树以 JSON 打进日志流。
 	traceExporter := obs.NewSlogExporter()

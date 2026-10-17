@@ -55,9 +55,9 @@ type Span struct {
 	// Kind 跨度种类 ( 见 SpanKind )。
 	Kind SpanKind `json:"kind,omitempty"`
 
-	StartedAt  int64 `json:"startedAt"`
-	EndedAt    int64 `json:"endedAt"`
-	DurationMs int64 `json:"durationMs"`
+	StartedAt int64 `json:"startedAt"`
+	EndedAt   int64 `json:"endedAt"`
+	ElapsedMs int64 `json:"elapsedMs"`
 
 	// Error 记录跨度内的失败信号 ( 由 SetError 写入 )，空值表示成功。
 	Error string `json:"error,omitempty"`
@@ -141,7 +141,7 @@ func (s *Span) End() {
 	s.ended = true
 
 	s.EndedAt = time.Now().UnixMilli()
-	s.DurationMs = s.EndedAt - s.StartedAt
+	s.ElapsedMs = s.EndedAt - s.StartedAt
 	mirror := s.otelSpan
 	s.mu.Unlock()
 

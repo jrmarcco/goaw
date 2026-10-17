@@ -247,13 +247,13 @@ func (e *AgentEngine) Run(ctx context.Context, sess *Session, reporter Reporter,
 	logging.For("engine").Debug("慢思考模式", "enabled", e.thinkMode)
 
 	// 运行摘要覆盖全部返回路径 ( 正常结束、强制收尾、错误 )。
-	runStart := time.Now()
+	startedAt := time.Now()
 	defer func() {
 		logging.For("engine").Info(
 			"运行结束",
 			"session", sess.ID,
-			"elapsed", time.Since(runStart),
 			"calls", cfg.calls,
+			"elapsed_ms", time.Since(startedAt),
 			"prompt_tokens", cfg.promptTokens,
 			"completion_tokens", cfg.completionTokens,
 		)

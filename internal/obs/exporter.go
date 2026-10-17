@@ -29,7 +29,7 @@ func (e *SlogExporter) Export(root *Span) {
 		"追踪树导出",
 		"root", root.Name,
 		"spans", countSpans(root),
-		"duration_ms", root.DurationMs,
+		"elapsed_ms", root.ElapsedMs,
 	)
 
 	payload, err := json.Marshal(root)
