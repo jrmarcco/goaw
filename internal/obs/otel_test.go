@@ -73,7 +73,7 @@ func TestDualWriteMirrorsSpanLifecycle(t *testing.T) {
 
 	attrs := make(map[string]string, len(got.Attributes()))
 	for _, kv := range got.Attributes() {
-		attrs[string(kv.Key)] = kv.Value.Emit()
+		attrs[string(kv.Key)] = kv.Value.String()
 	}
 	if attrs["tool_name"] != "bash" {
 		t.Fatalf("镜像属性 tool_name 应为 bash，实际 %q", attrs["tool_name"])
@@ -136,7 +136,7 @@ func TestOtelAttributePrimitives(t *testing.T) {
 			t.Parallel()
 
 			want := fmt.Sprintf("%v", tc.val)
-			if got := otelAttribute("k", tc.val).Value.Emit(); got != want {
+			if got := otelAttribute("k", tc.val).Value.String(); got != want {
 				t.Fatalf("属性 %q 的镜像表示应为 %q，实际 %q", tc.name, want, got)
 			}
 		})

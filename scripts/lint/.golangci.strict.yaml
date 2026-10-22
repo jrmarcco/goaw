@@ -1,0 +1,166 @@
+version: "2"
+
+# 严格档：基线档的全部内容 + 观点/约定类检查。
+# 适用于新项目全量启用，或存量项目整改完成后的目标档；建议作软门槛（报告不阻断）。
+# 基线档见 .golangci.yaml。golangci-lint 无配置继承机制，本文件需与基线档同步维护。
+
+run:
+  timeout: 5m
+  # 路径一律以 git 仓库根为基准（理由见基线档注释）。
+  relative-path-mode: gitroot
+
+linters:
+  default: none
+  enable:
+    # ==================== 四大件 ====================
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+
+    # ==================== 错误处理与资源 ====================
+    - errorlint
+    - nilerr
+    - noctx
+    - bodyclose
+    - durationcheck
+
+    # ==================== 零误报杂项 ====================
+    - unconvert
+    - wastedassign
+    - misspell
+    - usestdlibvars
+    - predeclared
+    - copyloopvar
+    - asasalint
+    - goprintffuncname
+    - reassign
+    - bidichk
+    - nakedret
+
+    # ==================== 结构与安全 ====================
+    - gosec
+    - unparam
+    - goconst
+    - sloglint
+
+    # ==================== 测试与元信息 ====================
+    - usetesting
+    - thelper
+    - tparallel
+    - testableexamples
+    - gomoddirectives
+    - nolintlint
+
+    # ==================== 以下为严格档新增 ====================
+    # 阈值类：阈值本身是团队观点，存量项目按需调整或分批整改。
+    - cyclop
+    - funlen
+    - dupl
+    # 只查函数参数中的魔术数字，全量检查（operation/condition 等）噪音过高。
+    - mnd
+    # 风格与命名约定。
+    - gocritic
+    # revive 使用默认规则集。注意：rules 一旦设置会“整体替换”默认规则集，
+    # 只列一条 disabled 规则等于让 revive 完全空转；禁用某规则必须显式列出全部想要的规则。
+    - revive
+    # JSON/YAML tag 命名约定，见下方 tagliatelle 设置。
+    - tagliatelle
+    # error 类型应有 Error 后缀（仅检查导出类型）。
+    - errname
+    # 禁止返回 (nil, nil)。
+    - nilnil
+    # 要求测试使用 t.Parallel()。
+    - paralleltest
+    # 已知存在误报，用噪音换信号。
+    - prealloc
+    - contextcheck
+    # switch 需穷尽 enum（有 default 分支即视为穷尽）。
+    - exhaustive
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      # 严格档同时检查 `_ = f()` 式空白忽略；清理场景请写 `//nolint:errcheck // 刻意忽略` 并说明原因。
+      check-blank: true
+    govet:
+      enable:
+        - nilness
+        - shadow
+    gosec:
+      excludes:
+        - G115
+    goconst:
+      min-len: 2
+      min-occurrences: 3
+    nolintlint:
+      allow-unused: false
+      require-explanation: true
+      require-specific: true
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: github.com/pkg/errors
+              desc: "标准库 errors + fmt %w 已覆盖其全部能力"
+            - pkg: github.com/sirupsen/logrus
+              desc: "日志请用 log/slog 或 go.uber.org/zap"
+    cyclop:
+      max-complexity: 20
+    funlen:
+      lines: 100
+      statements: 40
+    dupl:
+      # 默认 150 token 对 CRUD 类代码偏严，放宽到 200。
+      threshold: 200
+    mnd:
+      checks:
+        - argument
+    gocritic:
+      disabled-checks:
+        - commentedOutCode
+        - commentFormatting
+        - assignOp
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+      settings:
+        hugeParam:
+          # Size in bytes that makes the warning trigger.
+          # Default: 80
+          sizeThreshold: 1024
+    exhaustive:
+      check-generated: false
+      default-signifies-exhaustive: true
+    tagliatelle:
+      # 显式声明约定，避免依赖默认值；项目约定不同时改这里。
+      case:
+        rules:
+          json: camel
+          yaml: kebab
+
+  exclusions:
+    rules:
+      # 测试文件豁免阈值类检查。
+      - path: _test\.go
+        linters:
+          - funlen
+          - dupl
+          - mnd
+      # 生成式 mock 目录全量豁免（依赖 generated 头注释的排除见 linters.exclusions.generated 默认值）。
+      - path: (mock|mocks)/.*\.go
+        linters:
+          - all
+
+issues:
+  # cyclop 与 funlen 都把报告锚定在函数声明行；默认按行去重会静默吞掉其中一条，
+  # 严格档要看全量问题，关闭该去重。
+  uniq-by-line: false
+
+formatters:
+  enable:
+    - gofumpt

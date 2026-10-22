@@ -275,7 +275,7 @@ func prepareSandbox(ctx context.Context, tc TestCase) (string, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-c", tc.SetupScript)
 	cmd.Dir = workspace
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("Setup 脚本执行失败: %w", err)
+		return "", fmt.Errorf("setup 脚本执行失败: %w", err)
 	}
 
 	return workspace, nil

@@ -1,250 +1,106 @@
 version: "2"
 
+# 基线档：低误报、高信号，任何 Go 项目（含存量代码）启用当天应保持全绿，可作 CI 阻断。
+# 观点/约定类检查见 .golangci.strict.yaml（严格档），由 `make lint-strict` 使用。
+
 run:
   # Timeout for total work, e.g. 30s, 5m, 5m30s.
   # If the value is lower or equal to 0, the timeout is disabled.
   # Default: 0 (disabled)
   timeout: 5m
-  # Number of operating system threads (`GOMAXPROCS`) that can execute golangci-lint simultaneously.
-  # Default: 0 (automatically set to match Linux container CPU quota and
-  # fall back to the number of logical CPUs in the machine)
-  concurrency: 4
-
-output:
-  # By default, the report are related to the path obtained by `run.relative-path-mode`.
-  # The mode `abs` allows to show absolute file paths instead of relative file paths.
-  # The option `output.path-prefix` is ignored when using `abs` mode.
-  # Default: ""
-  path-mode: "abs"
-  # Show statistics per linter.
-  # Default: true
-  show-stats: true
+  # 路径一律以 git 仓库根为基准。
+  # 配置在子目录时默认的 cfg 模式会让相对路径指向 scripts/lint/ 下，
+  # 导致 exclusions 规则静默失效，必须显式指定 gitroot。
+  relative-path-mode: gitroot
 
 linters:
   default: none
   enable:
-    # ==================== 基础必备 ====================
-    # Official Go tool. Must have.
+    # ==================== 四大件 ====================
     - govet
-    # Forces to not skip error check.
-    - errcheck
-    # Detects when assignments to existing variables are not used.
-    - ineffassign
-    # Must have. Finds unused declarations.
-    - unused
-    # Apply staticcheck rules (comprehensive static analysis).
     - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
 
-    # ==================== 错误处理 ====================
-    # Checks `Err-` prefix for var and `-Error` suffix for error type.
-    - errname
+    # ==================== 错误处理与资源 ====================
     # Suggests to use `%w` for error-wrapping.
     - errorlint
-    # Both require a bit more explicit returns.
+    # Requires returning error in `if err != nil` branches.
     - nilerr
-    - nilnil
-
-    # ==================== 代码质量 ====================
-    # Checks function and package cyclomatic complexity.
-    - cyclop
-    # Tool for code clone detection.
-    - dupl
-    # Reports magic constants. Might be noisy but still good.
-    - mnd
-    # Powerful code checker with many rules.
-    - gocritic
-    # Drop-in replacement of `golint`.
-    - revive
-    # Check function length.
-    - funlen
-    # Check constants across the code.
-    - goconst
-
-    # ==================== 性能优化 ====================
-    # Finds slices that could potentially be pre-allocated.
-    - prealloc
-    # Remove unnecessary type conversions.
-    - unconvert
-    # Finds wasted assignment statements.
-    - wastedassign
-    # Might be noisy but better to know what is unused.
-    - unparam
-
-    # ==================== 安全检查 ====================
-    # Powerful security-oriented linter.
-    - gosec
-    # Checks for dangerous unicode character sequences.
-    - bidichk
-
-    # ==================== Context 相关 ====================
-    # Finds sending HTTP request without context.Context.
+    # Finds HTTP request without context.Context.
     - noctx
-    # Check whether the function uses a non-inherited context.
-    - contextcheck
-
-    # ==================== 资源管理 ====================
-    # Checks whether HTTP response body is closed successfully.
+    # Checks whether HTTP response body is closed.
     - bodyclose
-    # Check for two durations multiplied together.
+    # Checks for two durations multiplied together.
     - durationcheck
 
-    # ==================== 代码风格 ====================
-    # Finds naked/bare returns and requires change them.
-    - nakedret
-    # Check struct tags.
-    - tagliatelle
-    # Detect the possibility to use variables/constants from stdlib.
-    - usestdlibvars
-    # Finds shadowing of Go's predeclared identifiers.
-    - predeclared
-    # Fix all the misspells.
+    # ==================== 零误报杂项 ====================
+    - unconvert
+    - wastedassign
     - misspell
+    - usestdlibvars
+    - predeclared
+    - copyloopvar
+    - asasalint
+    - goprintffuncname
+    - reassign
+    - bidichk
+    - nakedret
 
-    # ==================== 测试相关 ====================
+    # ==================== 结构与安全 ====================
+    - gosec
+    - unparam
+    - goconst
+    # Enforce slog usage conventions (matches the depguard policy below).
+    - sloglint
+
+    # ==================== 测试与元信息 ====================
     - usetesting
-    - testableexamples
     - thelper
     - tparallel
-    - paralleltest
-
-    # ==================== 特殊用途 ====================
-    # Check for pass []any as any in variadic func(...any).
-    - asasalint
-    # Checks for pointers to enclosing loop variables.
-    - copyloopvar
-    # Check switch exhaustiveness.
-    - exhaustive
-    # Dependency guard ( forbid some packages ).
-    - depguard
-    # Allow or ban replace directives in go.mod.
+    - testableexamples
     - gomoddirectives
-    # Check Printf-like function names.
-    - goprintffuncname
-    # Checks that package variables are not reassigned.
-    - reassign
-    # Forces comment why another check is disabled.
+    # Requires nolint directives to be specific and explained.
     - nolintlint
-    # Lint your Prometheus metrics name.
-    - promlinter
 
   settings:
-    depguard:
-      rules:
-        # pkg 包是业务无关的封装，强制使用 slog 保持框架无关。
-        pkg:
-          files:
-            - "**/pkg/**/*.go"
-            # provider 是 uber/fx 模块的提供者，不需要遵守此规则。
-            - "!**/pkg/provider/**.go"
-          deny:
-            # forbid using zap in pkg directory, use slog instead
-            - pkg: "go.uber.org/zap"
-              desc: "Use log/slog in pkg directory to keep it framework-agnostic"
-            # forbid using logrus
-            - pkg: "github.com/sirupsen/logrus"
-              desc: "Use log/slog for logging in pkg directory"
-            # forbid using pkg/errors, use standard library errors package instead
-            - pkg: "github.com/pkg/errors"
-              desc: "Use standard library errors package instead"
-        # 业务代码禁止使用第三方低质量日志库 ( 允许 slog 或 zap )。
-        main:
-          files:
-            - "!**/pkg/**/*.go"
-          deny:
-            # forbid using logrus
-            - pkg: "github.com/sirupsen/logrus"
-              desc: "Use log/slog or go.uber.org/zap for logging"
-            # forbid using pkg/errors, use standard library errors package instead
-            - pkg: "github.com/pkg/errors"
-              desc: "Use standard library errors package instead"
-            # forbid using testify's fork
-            - pkg: "github.com/instana/testify"
-              desc: "Use github.com/stretchr/testify instead"
-    gosec:
-      excludes:
-        - G115 # Type conversion which leads to integer overflow
-    cyclop:
-      max-complexity: 20
     errcheck:
+      # 也检查类型断言的错误返回。check-blank（`_ = f()`）属观点类，在严格档开启。
       check-type-assertions: true
-    goconst:
-      min-len: 2
-      min-occurrences: 3
-    revive:
-      rules:
-        - name: unused-parameter
-          severity: disabled  # or severity: warning
-    gocritic:
-      disabled-checks:
-        - commentedOutCode
-        - commentFormatting
-        - assignOp
-      enabled-tags:
-        - diagnostic
-        - experimental
-        - opinionated
-        - performance
-        - style
-      settings:
-        hugeParam:
-          # Size in bytes that makes the warning trigger.
-          # Default: 80
-          sizeThreshold: 1024
     govet:
       enable:
         - nilness
         - shadow
+    gosec:
+      excludes:
+        - G115 # 整型截断类转换误报率高，按需单独处理。
+    goconst:
+      min-len: 2
+      min-occurrences: 3
     nolintlint:
       allow-unused: false # report any unused nolint directives
       require-explanation: true # require an explanation for nolint directives
       require-specific: true # require nolint directives to be specific about which linter is being skipped
-    staticcheck:
-      checks:
-        # disable SA4008 ( "-" means exclude )
-        # SA4008 is used to detect repeated assignment to the same variable, and the intermediate value is never used.
-        # For example:
-        #   result := defaultValue
-        #   if something {
-        #     result = betterCalculation()
-        #   }
-        #   return result
-        - "-SA4008"
-    exhaustive:
-      check-generated: false
-      default-signifies-exhaustive: true
-    funlen:
-      lines: 100
-      statements: 40
-  exclusions:
-    paths:
-      - .git
-      - .github
-      - .idea
-      - .vscode
-      - scripts
-      - etc
-    rules:
-      - path: go.mod
-        linters:
-          - gomoddirectives
-        text: "local replacement"
-      - path: (.+)_test\.go
-        linters:
-          - funlen
-          - dupl
-      - path: mock/.*\.go
-        linters:
-          - all
+    # 注意：staticcheck 的 checks 一旦设置会“整体替换”默认检查集。
+    # 只写 ["-SA4008"] 会把 SA/ST 全系静默关掉；排除某项必须写成 ["all", "-SA4008"]。
+    # 本配置不设置 checks，即使用默认全集。
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: github.com/pkg/errors
+              desc: "标准库 errors + fmt %w 已覆盖其全部能力"
+            - pkg: github.com/sirupsen/logrus
+              desc: "日志请用 log/slog 或 go.uber.org/zap"
+        # 项目专属规则示例（按项目需要增删；files 匹配不到任何文件时规则空转）：
+        # pkg-layer:
+        #   files:
+        #     - "**/pkg/**/*.go"
+        #   deny:
+        #     - pkg: go.uber.org/zap
+        #       desc: "pkg 层保持框架无关，使用 log/slog"
 
 formatters:
   enable:
     - gofumpt
-  exclusions:
-    paths:
-      - .git
-      - .github
-      - .idea
-      - .vscode
-      - scripts
-      - etc
-      - docs
