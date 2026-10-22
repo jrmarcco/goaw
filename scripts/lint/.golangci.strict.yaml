@@ -1,12 +1,14 @@
 version: "2"
 
-# 严格档：基线档的全部内容 + 观点/约定类检查。
-# 适用于新项目全量启用，或存量项目整改完成后的目标档；建议作软门槛（报告不阻断）。
+# 严格档：
+# 基线档的全部内容 + 观点/约定类检查。
+# 适用于新项目全量启用，或存量项目整改完成后的目标档；建议作软门槛 ( 报告不阻断 )。
+#
 # 基线档见 .golangci.yaml。golangci-lint 无配置继承机制，本文件需与基线档同步维护。
 
 run:
   timeout: 5m
-  # 路径一律以 git 仓库根为基准（理由见基线档注释）。
+  # 路径一律以 git 仓库根为基准 ( 理由见基线档注释 )。
   relative-path-mode: gitroot
 
 linters:
@@ -58,16 +60,19 @@ linters:
     - cyclop
     - funlen
     - dupl
-    # 只查函数参数中的魔术数字，全量检查（operation/condition 等）噪音过高。
+    # 只查函数参数中的魔术数字，全量检查 ( operation/condition 等 ) 噪音过高。
     - mnd
     # 风格与命名约定。
     - gocritic
-    # revive 使用默认规则集。注意：rules 一旦设置会“整体替换”默认规则集，
-    # 只列一条 disabled 规则等于让 revive 完全空转；禁用某规则必须显式列出全部想要的规则。
+    # revive 使用默认规则集。
+    # 注意：
+    # rules 一旦设置会 "整体替换" 默认规则集，
+    # 只列一条 disabled 规则等于让 revive 完全空转；
+    # 禁用某规则必须显式列出全部想要的规则。
     - revive
     # JSON/YAML tag 命名约定，见下方 tagliatelle 设置。
     - tagliatelle
-    # error 类型应有 Error 后缀（仅检查导出类型）。
+    # error 类型应有 Error 后缀 ( 仅检查导出类型 )。
     - errname
     # 禁止返回 (nil, nil)。
     - nilnil
@@ -76,7 +81,7 @@ linters:
     # 已知存在误报，用噪音换信号。
     - prealloc
     - contextcheck
-    # switch 需穷尽 enum（有 default 分支即视为穷尽）。
+    # switch 需穷尽 enum ( 有 default 分支即视为穷尽 )。
     - exhaustive
 
   settings:
@@ -151,7 +156,7 @@ linters:
           - funlen
           - dupl
           - mnd
-      # 生成式 mock 目录全量豁免（依赖 generated 头注释的排除见 linters.exclusions.generated 默认值）。
+      # 生成式 mock 目录全量豁免 ( 依赖 generated 头注释的排除见 linters.exclusions.generated 默认值 )。
       - path: (mock|mocks)/.*\.go
         linters:
           - all
